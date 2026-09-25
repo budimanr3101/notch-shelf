@@ -16,6 +16,7 @@
 		A10000000000000000000007 /* FileMoveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* FileMoveService.swift */; };
 		A10000000000000000000008 /* NotchOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* NotchOverlayController.swift */; };
 		A10000000000000000000009 /* NotchShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* NotchShelfView.swift */; };
+		A1000000000000000000000C /* Pocketbook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* Pocketbook.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 		B10000000000000000000009 /* NotchShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchShelfView.swift; sourceTree = "<group>"; };
 		B1000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000000000000000000000B /* NotchShelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotchShelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000C /* Pocketbook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pocketbook.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +65,7 @@
 				B10000000000000000000007 /* FileMoveService.swift */,
 				B10000000000000000000008 /* NotchOverlayController.swift */,
 				B10000000000000000000009 /* NotchShelfView.swift */,
+				B1000000000000000000000C /* Pocketbook.swift */,
 				B1000000000000000000000A /* Info.plist */,
 			);
 			path = NotchShelf;
@@ -153,6 +156,7 @@
 				A10000000000000000000007 /* FileMoveService.swift in Sources */,
 				A10000000000000000000008 /* NotchOverlayController.swift in Sources */,
 				A10000000000000000000009 /* NotchShelfView.swift in Sources */,
+				A1000000000000000000000C /* Pocketbook.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
