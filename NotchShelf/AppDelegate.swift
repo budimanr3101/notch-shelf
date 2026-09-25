@@ -1,7 +1,11 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private static let defaultOpenerDefaultsKey = "NotchShelf.defaultDropOpener"
+    private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
+
     private let coordinator = ShelfCoordinator()
 
     private var statusItem: NSStatusItem?
@@ -81,11 +85,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         projectStatusItem = project
 
         let openRecent = NSMenuItem(
-            title: "Open Recent",
-            action: #selector(openRecentWithDefaultApp),
+            title: "Open Recent With",
+            action: nil,
             keyEquivalent: ""
         )
-        openRecent.target = self
+        openRecent.submenu = NSMenu(title: "Open Recent With")
         menu.addItem(openRecent)
         openRecentItem = openRecent
 
@@ -138,38 +142,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ?? "Recent: None"
         openRecentItem?.isEnabled = hasProject
         clearProjectItem?.isEnabled = hasProject
-        openRecentItem?.title = "Open Recent in \(coordinator.defaultDropOpenerName)"
     }
 
     private func updateDropOpenerUI() {
         defaultDropAppItem?.title = "Default Drop App: \(coordinator.defaultDropOpenerName)"
-        openRecentItem?.title = "Open Recent in \(coordinator.defaultDropOpenerName)"
 
-        guard let submenu = defaultDropAppItem?.submenu else { return }
-        submenu.removeAllItems()
+        // Only surface applications that really exist on this Mac. The catalog is
+        // deliberately larger than the menu so we can support an app automatically
+        // when the user installs it later without showing dead options today.
+        let availableOptions = coordinator.dropOpenerMenuOptions.filter { $0.isAvailable }
 
-        for option in coordinator.dropOpenerMenuOptions {
-            let item = NSMenuItem(
-                title: option.displayName,
-                action: #selector(selectDropOpener(_:)),
+        if let submenu = defaultDropAppItem?.submenu {
+            submenu.removeAllItems()
+
+            for option in availableOptions {
+                let item = NSMenuItem(
+                    title: option.displayName,
+                    action: #selector(selectDropOpener(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = option.id
+                item.state = option.isSelected ? .on : .off
+                submenu.addItem(item)
+            }
+
+            submenu.addItem(.separator())
+
+            let custom = NSMenuItem(
+                title: "Choose Custom App…",
+                action: #selector(chooseCustomDropApp),
                 keyEquivalent: ""
             )
-            item.target = self
-            item.representedObject = option.id
-            item.isEnabled = option.isAvailable
-            item.state = option.isSelected ? .on : .off
-            submenu.addItem(item)
+            custom.target = self
+            submenu.addItem(custom)
         }
 
-        submenu.addItem(.separator())
+        if let recentMenu = openRecentItem?.submenu {
+            recentMenu.removeAllItems()
 
-        let custom = NSMenuItem(
-            title: "Choose Custom App…",
-            action: #selector(chooseCustomDropApp),
-            keyEquivalent: ""
-        )
-        custom.target = self
-        submenu.addItem(custom)
+            for option in availableOptions {
+                let item = NSMenuItem(
+                    title: option.displayName,
+                    action: #selector(openRecentWithOpener(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = option.id
+                recentMenu.addItem(item)
+            }
+
+            recentMenu.addItem(.separator())
+
+            let chooseOther = NSMenuItem(
+                title: "Choose Other App…",
+                action: #selector(chooseOtherAppForRecent),
+                keyEquivalent: ""
+            )
+            chooseOther.target = self
+            recentMenu.addItem(chooseOther)
+        }
     }
 
     @objc private func clearShelf() {
@@ -185,8 +217,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.chooseCustomDropApp()
     }
 
-    @objc private func openRecentWithDefaultApp() {
+    @objc private func openRecentWithOpener(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        performRecentOpen(usingTemporaryOpenerID: id)
+    }
+
+    @objc private func chooseOtherAppForRecent() {
+        let picker = NSOpenPanel()
+        picker.title = "Open Recent With"
+        picker.message = "Choose an application for this open only. Your default Drop Zone app will not change."
+        picker.prompt = "Open"
+        picker.canChooseFiles = true
+        picker.canChooseDirectories = false
+        picker.allowsMultipleSelection = false
+        picker.allowedContentTypes = [.application]
+        picker.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard picker.runModal() == .OK, let appURL = picker.url else { return }
+
+        let defaults = UserDefaults.standard
+        let previousDefault = defaults.string(forKey: Self.defaultOpenerDefaultsKey)
+        let previousCustomPath = defaults.string(forKey: Self.customOpenerPathDefaultsKey)
+
+        defaults.set(appURL.path, forKey: Self.customOpenerPathDefaultsKey)
+        defaults.set("custom", forKey: Self.defaultOpenerDefaultsKey)
+
+        // openRecentWithDefaultApp resolves the opener synchronously before the
+        // actual NSWorkspace open callback, so restoring the preference immediately
+        // keeps this choice truly one-shot while preserving all notch animations.
         coordinator.openRecentWithDefaultApp()
+
+        restoreDefaults(
+            previousDefault: previousDefault,
+            previousCustomPath: previousCustomPath
+        )
+        updateDropOpenerUI()
+    }
+
+    private func performRecentOpen(usingTemporaryOpenerID id: String) {
+        let defaults = UserDefaults.standard
+        let previousDefault = defaults.string(forKey: Self.defaultOpenerDefaultsKey)
+
+        defaults.set(id, forKey: Self.defaultOpenerDefaultsKey)
+        coordinator.openRecentWithDefaultApp()
+
+        if let previousDefault {
+            defaults.set(previousDefault, forKey: Self.defaultOpenerDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.defaultOpenerDefaultsKey)
+        }
+
+        updateDropOpenerUI()
+    }
+
+    private func restoreDefaults(previousDefault: String?, previousCustomPath: String?) {
+        let defaults = UserDefaults.standard
+
+        if let previousDefault {
+            defaults.set(previousDefault, forKey: Self.defaultOpenerDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.defaultOpenerDefaultsKey)
+        }
+
+        if let previousCustomPath {
+            defaults.set(previousCustomPath, forKey: Self.customOpenerPathDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: Self.customOpenerPathDefaultsKey)
+        }
     }
 
     @objc private func clearRecentProject() {
