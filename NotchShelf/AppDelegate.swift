@@ -3,11 +3,12 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = ShelfCoordinator()
+
     private var statusItem: NSStatusItem?
     private var shelfStatusItem: NSMenuItem?
     private var projectStatusItem: NSMenuItem?
-    private var openProjectFinderItem: NSMenuItem?
-    private var openProjectTerminalItem: NSMenuItem?
+    private var defaultDropAppItem: NSMenuItem?
+    private var openRecentItem: NSMenuItem?
     private var clearProjectItem: NSMenuItem?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -23,9 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.onProjectChanged = { [weak self] url in
             self?.updateProjectStatus(url: url)
         }
+        coordinator.onDropOpenerChanged = { [weak self] in
+            self?.updateDropOpenerUI()
+        }
 
         coordinator.start()
         updateProjectStatus(url: coordinator.recentProjectURL)
+        updateDropOpenerUI()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -47,34 +52,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(shelf)
         shelfStatusItem = shelf
 
-        let clear = NSMenuItem(title: "Clear Shelf", action: #selector(clearShelf), keyEquivalent: "")
+        let clear = NSMenuItem(
+            title: "Clear Shelf",
+            action: #selector(clearShelf),
+            keyEquivalent: ""
+        )
         clear.target = self
         menu.addItem(clear)
 
         menu.addItem(.separator())
 
-        let project = NSMenuItem(title: "Project: None", action: nil, keyEquivalent: "")
+        let dropHeader = NSMenuItem(title: "Developer Drop Zone", action: nil, keyEquivalent: "")
+        dropHeader.isEnabled = false
+        menu.addItem(dropHeader)
+
+        let defaultApp = NSMenuItem(
+            title: "Default Drop App",
+            action: nil,
+            keyEquivalent: ""
+        )
+        defaultApp.submenu = NSMenu(title: "Default Drop App")
+        menu.addItem(defaultApp)
+        defaultDropAppItem = defaultApp
+
+        let project = NSMenuItem(title: "Recent: None", action: nil, keyEquivalent: "")
         project.isEnabled = false
         menu.addItem(project)
         projectStatusItem = project
 
-        let openFinder = NSMenuItem(
-            title: "Open Project in Finder",
-            action: #selector(openProjectInFinder),
+        let openRecent = NSMenuItem(
+            title: "Open Recent",
+            action: #selector(openRecentWithDefaultApp),
             keyEquivalent: ""
         )
-        openFinder.target = self
-        menu.addItem(openFinder)
-        openProjectFinderItem = openFinder
-
-        let openTerminal = NSMenuItem(
-            title: "Open Project in Terminal",
-            action: #selector(openProjectInTerminal),
-            keyEquivalent: ""
-        )
-        openTerminal.target = self
-        menu.addItem(openTerminal)
-        openProjectTerminalItem = openTerminal
+        openRecent.target = self
+        menu.addItem(openRecent)
+        openRecentItem = openRecent
 
         let clearProject = NSMenuItem(
             title: "Clear Recent Project",
@@ -99,11 +112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateShelfStatus(count: 0)
         updateProjectStatus(url: nil)
+        updateDropOpenerUI()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         updateShelfStatus(count: coordinator.stagedCount)
         updateProjectStatus(url: coordinator.recentProjectURL)
+        updateDropOpenerUI()
     }
 
     private func updateShelfStatus(count: Int) {
@@ -119,23 +134,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateProjectStatus(url: URL?) {
         let hasProject = url != nil
-        projectStatusItem?.title = url.map { "Project: \($0.lastPathComponent)" }
-            ?? "Project: None"
-        openProjectFinderItem?.isEnabled = hasProject
-        openProjectTerminalItem?.isEnabled = hasProject
+        projectStatusItem?.title = url.map { "Recent: \($0.lastPathComponent)" }
+            ?? "Recent: None"
+        openRecentItem?.isEnabled = hasProject
         clearProjectItem?.isEnabled = hasProject
+        openRecentItem?.title = "Open Recent in \(coordinator.defaultDropOpenerName)"
+    }
+
+    private func updateDropOpenerUI() {
+        defaultDropAppItem?.title = "Default Drop App: \(coordinator.defaultDropOpenerName)"
+        openRecentItem?.title = "Open Recent in \(coordinator.defaultDropOpenerName)"
+
+        guard let submenu = defaultDropAppItem?.submenu else { return }
+        submenu.removeAllItems()
+
+        for option in coordinator.dropOpenerMenuOptions {
+            let item = NSMenuItem(
+                title: option.displayName,
+                action: #selector(selectDropOpener(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = option.id
+            item.isEnabled = option.isAvailable
+            item.state = option.isSelected ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
+
+        let custom = NSMenuItem(
+            title: "Choose Custom App…",
+            action: #selector(chooseCustomDropApp),
+            keyEquivalent: ""
+        )
+        custom.target = self
+        submenu.addItem(custom)
     }
 
     @objc private func clearShelf() {
         coordinator.clearShelf()
     }
 
-    @objc private func openProjectInFinder() {
-        coordinator.openRecentProjectInFinder()
+    @objc private func selectDropOpener(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        coordinator.setDefaultDropOpener(id: id)
     }
 
-    @objc private func openProjectInTerminal() {
-        coordinator.openRecentProjectInTerminal()
+    @objc private func chooseCustomDropApp() {
+        coordinator.chooseCustomDropApp()
+    }
+
+    @objc private func openRecentWithDefaultApp() {
+        coordinator.openRecentWithDefaultApp()
     }
 
     @objc private func clearRecentProject() {
