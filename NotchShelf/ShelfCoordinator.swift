@@ -493,10 +493,10 @@ final class ProjectDropTarget {
     var onDragExited: (() -> Void)?
     var onItemDropped: ((URL) -> Void)?
 
-    private static let magneticDepth: CGFloat = 92
-    private static let magneticExtraWidth: CGFloat = 190
-    private static let minimumMagneticWidth: CGFloat = 340
-    private static let dragThreshold: CGFloat = 7
+    private static let magneticDepth: CGFloat = 156
+    private static let magneticExtraWidth: CGFloat = 260
+    private static let minimumMagneticWidth: CGFloat = 430
+    private static let dragThreshold: CGFloat = 5
     private static let pollingInterval: TimeInterval = 0.035
 
     private var panel: ProjectDropPanel?
@@ -620,13 +620,13 @@ final class ProjectDropTarget {
         let anchor = pressAnchor ?? location
         let distance = hypot(location.x - anchor.x, location.y - anchor.y)
         let isRealDrag = distance >= Self.dragThreshold
-        let activationFrame = magneticFrame.insetBy(dx: -18, dy: -10)
+        let activationFrame = magneticFrame.insetBy(dx: -42, dy: -34)
 
         if isRealDrag && activationFrame.contains(location) {
             if !magneticActive {
                 magneticActive = true
                 panel.orderFrontRegardless()
-                NSLog("[NotchShelf] Magnetic drop zone armed before macOS top edge")
+                NSLog("[NotchShelf] Magnetic drop zone armed early before macOS top edge")
             }
             return
         }
