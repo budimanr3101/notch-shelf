@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 
+@MainActor
 final class ShortcutMonitor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -33,7 +34,12 @@ final class ShortcutMonitor {
             callback: { _, type, event, userInfo in
                 guard let userInfo else { return Unmanaged.passUnretained(event) }
                 let monitor = Unmanaged<ShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
-                return monitor.handle(type: type, event: event)
+
+                // This event tap is installed on the main run loop below, so bridge
+                // the C callback back into the Swift main-actor world explicitly.
+                return MainActor.assumeIsolated {
+                    monitor.handle(type: type, event: event)
+                }
             },
             userInfo: pointer
         ) else {
@@ -74,12 +80,12 @@ final class ShortcutMonitor {
 
         // ANSI keyboard keycodes: X = 7, V = 9.
         if keyCode == 7 {
-            DispatchQueue.main.async { [weak self] in self?.onCut?() }
+            onCut?()
             return nil
         }
 
         if keyCode == 9, shouldCapturePaste?() == true {
-            DispatchQueue.main.async { [weak self] in self?.onPaste?() }
+            onPaste?()
             return nil
         }
 
