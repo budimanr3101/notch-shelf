@@ -243,8 +243,10 @@ final class PocketbookFeature {
         model.reset()
         model.presented = false
 
-        let width = min(max(geometry.hardwareWidth + 340, 540), screen.frame.width - 48)
-        let height = min(geometry.hardwareHeight + 356, screen.frame.height * 0.54)
+        let width = min(max(geometry.hardwareWidth + 300, 460), min(520, screen.frame.width - 24))
+        // The panel is only a transparent drawing envelope. The visible surface
+        // has separate home and detail depths inside this fixed frame.
+        let height = min(350, screen.frame.height * 0.60)
         let frame = NSRect(
             x: screen.frame.midX - width / 2,
             y: screen.frame.maxY - height,
@@ -280,8 +282,9 @@ final class PocketbookFeature {
         let restore = previousApp
         previousApp = nil
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) { [weak self, weak panel] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.46) { [weak self, weak panel] in
             panel?.orderOut(nil)
+            guard self?.panel === panel else { return }
             self?.panel = nil
 
             if let restore = restore,
@@ -450,24 +453,31 @@ private struct PocketbookView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var tabSelection
-    @State private var chromeReady = false
+    @State private var shoulderProgress: CGFloat = 0
+    @State private var bridgeProgress: CGFloat = 0
     @State private var contentReady = false
+    @State private var searchReady = false
+    @State private var rowsReady = false
 
-    private var spring: Animation? {
-        if reduceMotion { return nil }
-        return .spring(response: 0.42, dampingFraction: 0.82)
+    private var visibleHeight: CGFloat {
+        min(model.selectedID == nil ? 260 : 338, 350)
     }
 
     var body: some View {
         ZStack(alignment: .top) {
             chrome
 
-            if model.presented {
-                content
-                    .opacity(contentReady ? 1 : 0)
-                    .offset(y: contentReady ? 0 : -10)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            content
+                .opacity(contentReady ? 1 : 0)
+                .offset(y: reduceMotion || contentReady ? 0 : -6)
+                .mask(PocketbookNotchSurface(
+                    hardwareWidth: geometry.hardwareWidth,
+                    hardwareHeight: geometry.hardwareHeight,
+                    shoulderExpansion: shoulderProgress,
+                    bridgeExpansion: bridgeProgress,
+                    visibleHeight: visibleHeight
+                ))
+                .allowsHitTesting(contentReady && model.presented)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
@@ -477,7 +487,9 @@ private struct PocketbookView: View {
             syncPresentation(value)
         }
         .onChange(of: model.selectedID) { value in
-            if value == nil && model.presented {
+            if value != nil {
+                searchFocused = false
+            } else if model.presented {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                     searchFocused = true
                 }
@@ -486,53 +498,45 @@ private struct PocketbookView: View {
     }
 
     private var chrome: some View {
-        let progress: CGFloat = chromeReady && model.presented ? 1 : 0
         let shape = PocketbookNotchSurface(
             hardwareWidth: geometry.hardwareWidth,
             hardwareHeight: geometry.hardwareHeight,
-            expansion: progress
+            shoulderExpansion: shoulderProgress,
+            bridgeExpansion: bridgeProgress,
+            visibleHeight: visibleHeight
         )
 
         return shape
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.black,
-                        Color(red: 0.035, green: 0.042, blue: 0.055),
-                        Color.black.opacity(0.985),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            .fill(Color(red: 0.025, green: 0.028, blue: 0.035))
             .overlay {
-                shape
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.16),
-                                .white.opacity(0.055),
-                                .clear,
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.8
-                    )
+                PocketbookOuterEdge(
+                    hardwareWidth: geometry.hardwareWidth,
+                    hardwareHeight: geometry.hardwareHeight,
+                    shoulderExpansion: shoulderProgress,
+                    bridgeExpansion: bridgeProgress,
+                    visibleHeight: visibleHeight
+                )
+                .stroke(.white.opacity(0.13), lineWidth: 0.7)
             }
             .shadow(
-                color: .black.opacity(progress > 0.7 ? 0.48 : 0),
-                radius: 22,
-                y: 10
+                color: .black.opacity(bridgeProgress > 0.6 ? 0.30 : 0),
+                radius: 13,
+                y: 5
             )
-            .animation(spring, value: progress)
+            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.89), value: visibleHeight)
     }
 
     private var content: some View {
-        VStack(spacing: 11) {
-            header
-            searchBar
-            tabs
+        VStack(spacing: 9) {
+            if model.selectedID == nil {
+                header
+                searchBar
+                    .opacity(searchReady ? 1 : 0)
+                    .offset(y: reduceMotion || searchReady ? 0 : -4)
+                tabs
+                    .opacity(searchReady ? 1 : 0)
+                    .offset(y: reduceMotion || searchReady ? 0 : -4)
+            }
 
             ZStack {
                 if let entry = model.selected {
@@ -553,16 +557,20 @@ private struct PocketbookView: View {
                         )
                 }
             }
+            .opacity(rowsReady ? 1 : 0)
+            .offset(y: reduceMotion || rowsReady ? 0 : -4)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.88),
                 value: model.selectedID
             )
 
-            footerHint
         }
         .padding(.horizontal, 18)
-        .padding(.top, geometry.hardwareHeight + 12)
-        .padding(.bottom, 13)
+        .padding(.top, geometry.hardwareHeight + 10)
+        .padding(.bottom, 14)
+        .frame(height: visibleHeight, alignment: .top)
+        .clipped()
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.89), value: visibleHeight)
     }
 
     private var header: some View {
@@ -606,7 +614,7 @@ private struct PocketbookView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.38))
 
-            TextField("Search Kubernetes reference…", text: $model.query)
+            TextField("Search Kubernetes…", text: $model.query)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -635,7 +643,7 @@ private struct PocketbookView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(
-                    searchFocused ? Color.accentColor.opacity(0.42) : .white.opacity(0.06),
+                    searchFocused ? Color.white.opacity(0.20) : .white.opacity(0.06),
                     lineWidth: 0.8
                 )
         }
@@ -682,7 +690,7 @@ private struct PocketbookView: View {
 
     private var results: some View {
         ScrollView {
-            LazyVStack(spacing: 5) {
+            LazyVStack(spacing: 0) {
                 if model.results.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
@@ -744,25 +752,21 @@ private struct PocketbookView: View {
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.white.opacity(0.22))
             }
-            .padding(.horizontal, 9)
-            .frame(height: 43)
+            .padding(.horizontal, 7)
+            .frame(height: 42)
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(.white.opacity(0.036))
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(.white.opacity(0.018))
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(.white.opacity(0.035), lineWidth: 0.6)
-            }
         }
         .buttonStyle(.plain)
-        .opacity(contentReady ? 1 : 0)
-        .offset(y: contentReady ? 0 : -5)
+        .opacity(rowsReady ? 1 : 0)
+        .offset(y: rowsReady ? 0 : -4)
         .animation(
             reduceMotion
                 ? nil
                 : .easeOut(duration: 0.25).delay(min(Double(index) * 0.025, 0.15)),
-            value: contentReady
+            value: rowsReady
         )
     }
 
@@ -886,51 +890,73 @@ private struct PocketbookView: View {
         }
     }
 
-    private var footerHint: some View {
-        HStack(spacing: 7) {
-            Text(model.selectedID == nil ? "↵ Open" : "Esc Back")
-            Circle().fill(.white.opacity(0.18)).frame(width: 2.5, height: 2.5)
-            Text(model.selectedID == nil ? "Esc Close" : "⌘C Copy")
-        }
-        .font(.system(size: 8.3, weight: .medium, design: .rounded))
-        .foregroundStyle(.white.opacity(0.24))
-        .frame(height: 9)
-    }
-
     private func syncPresentation(_ visible: Bool) {
         if visible {
             if reduceMotion {
-                chromeReady = true
+                shoulderProgress = 1
+                bridgeProgress = 1
                 contentReady = true
+                searchReady = true
+                rowsReady = true
                 searchFocused = true
                 return
             }
 
-            chromeReady = false
+            shoulderProgress = 0
+            bridgeProgress = 0
             contentReady = false
+            searchReady = false
+            rowsReady = false
             searchFocused = false
 
             DispatchQueue.main.async {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                    chromeReady = true
+                withAnimation(.spring(response: 0.27, dampingFraction: 0.91)) {
+                    shoulderProgress = 1
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                withAnimation(.easeOut(duration: 0.22)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.075) {
+                guard model.presented else { return }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.91)) {
+                    bridgeProgress = 1
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
+                guard model.presented else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
                     contentReady = true
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.21) {
+                guard model.presented else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    searchReady = true
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
+                guard model.presented else { return }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    rowsReady = true
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                guard model.presented else { return }
                 searchFocused = true
             }
         } else {
             searchFocused = false
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(.easeOut(duration: reduceMotion ? 0.08 : 0.13)) {
                 contentReady = false
+                searchReady = false
+                rowsReady = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
-                    chromeReady = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.08 : 0.09)) {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.23, dampingFraction: 0.91)) {
+                    bridgeProgress = 0
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.08 : 0.23)) {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.20, dampingFraction: 0.93)) {
+                    shoulderProgress = 0
                 }
             }
         }
@@ -977,33 +1003,124 @@ private struct PocketbookView: View {
 private struct PocketbookNotchSurface: Shape {
     let hardwareWidth: CGFloat
     let hardwareHeight: CGFloat
-    var expansion: CGFloat
+    var shoulderExpansion: CGFloat
+    var bridgeExpansion: CGFloat
+    var visibleHeight: CGFloat
 
-    var animatableData: CGFloat {
-        get { return expansion }
-        set { expansion = newValue }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(shoulderExpansion, bridgeExpansion), visibleHeight) }
+        set {
+            shoulderExpansion = newValue.first.first
+            bridgeExpansion = newValue.first.second
+            visibleHeight = newValue.second
+        }
     }
 
     func path(in rect: CGRect) -> Path {
-        let progress = min(max(expansion, 0), 1)
-        let collapsedWidth = min(rect.width - 12, hardwareWidth + 54)
-        let expandedWidth = rect.width - 10
-        let width = collapsedWidth + (expandedWidth - collapsedWidth) * progress
+        let shoulder = min(max(shoulderExpansion, 0), 1)
+        let bridge = min(max(bridgeExpansion, 0), 1)
+        guard shoulder > 0 || bridge > 0 else { return Path() }
 
-        let collapsedHeight = hardwareHeight + 9
-        let expandedHeight = rect.height - 5
-        let height = collapsedHeight + (expandedHeight - collapsedHeight) * progress
+        let extent = max(0, (rect.width - hardwareWidth) / 2 - 5) * shoulder
+        let left = rect.midX - hardwareWidth / 2 - extent
+        let right = rect.midX + hardwareWidth / 2 + extent
+        let depth = max(0, visibleHeight - hardwareHeight) * bridge
+        let bottom = hardwareHeight + depth
+        let topRadius = min(8, extent)
+        let bottomRadius = min(18, depth / 2, (right - left) / 4)
 
-        let frame = CGRect(
-            x: rect.midX - width / 2,
-            y: 0,
-            width: width,
-            height: height
+        // One outer contour keeps the two wings and the lower bridge aligned.
+        // The mask removes the unrenderable hardware area above the bridge.
+        var contour = Path()
+        contour.move(to: CGPoint(x: left, y: 0))
+        contour.addLine(to: CGPoint(x: right, y: 0))
+        contour.addQuadCurve(
+            to: CGPoint(x: right - topRadius, y: topRadius),
+            control: CGPoint(x: right - topRadius, y: 0)
         )
+        contour.addLine(to: CGPoint(x: right - topRadius, y: bottom - bottomRadius))
+        contour.addQuadCurve(
+            to: CGPoint(x: right - topRadius - bottomRadius, y: bottom),
+            control: CGPoint(x: right - topRadius, y: bottom)
+        )
+        contour.addLine(to: CGPoint(x: left + topRadius + bottomRadius, y: bottom))
+        contour.addQuadCurve(
+            to: CGPoint(x: left + topRadius, y: bottom - bottomRadius),
+            control: CGPoint(x: left + topRadius, y: bottom)
+        )
+        contour.addLine(to: CGPoint(x: left + topRadius, y: topRadius))
+        contour.addQuadCurve(
+            to: CGPoint(x: left, y: 0),
+            control: CGPoint(x: left + topRadius, y: 0)
+        )
+        contour.closeSubpath()
 
-        let radius = 14 + 10 * progress
-        return RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .path(in: frame)
+        let hardwareLeft = rect.midX - hardwareWidth / 2
+        let hardwareRight = rect.midX + hardwareWidth / 2
+        let overlap = NotchGeometry.connectionOverlap * shoulder
+        var drawable = Path()
+        drawable.addRect(CGRect(x: left, y: 0,
+                                width: hardwareLeft + overlap - left,
+                                height: hardwareHeight))
+        drawable.addRect(CGRect(x: hardwareRight - overlap, y: 0,
+                                width: right - hardwareRight + overlap,
+                                height: hardwareHeight))
+        if depth > 0 {
+            drawable.addRect(CGRect(x: left, y: hardwareHeight - 1,
+                                    width: right - left, height: depth + 1))
+        }
+        return contour.intersection(drawable)
+    }
+}
+
+/// Only the display-renderable outer perimeter gets an edge. In particular,
+/// nothing is stroked across the physical camera housing or its overlap mask.
+private struct PocketbookOuterEdge: Shape {
+    let hardwareWidth: CGFloat
+    let hardwareHeight: CGFloat
+    var shoulderExpansion: CGFloat
+    var bridgeExpansion: CGFloat
+    var visibleHeight: CGFloat
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(shoulderExpansion, bridgeExpansion), visibleHeight) }
+        set {
+            shoulderExpansion = newValue.first.first
+            bridgeExpansion = newValue.first.second
+            visibleHeight = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let shoulder = min(max(shoulderExpansion, 0), 1)
+        let bridge = min(max(bridgeExpansion, 0), 1)
+        guard shoulder > 0 else { return Path() }
+
+        let extent = max(0, (rect.width - hardwareWidth) / 2 - 5) * shoulder
+        let left = rect.midX - hardwareWidth / 2 - extent
+        let right = rect.midX + hardwareWidth / 2 + extent
+        let bottom = hardwareHeight + max(0, visibleHeight - hardwareHeight) * bridge
+        let topRadius = min(8, extent)
+        let bottomRadius = min(18, (bottom - hardwareHeight) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: left, y: 0))
+        path.addQuadCurve(to: CGPoint(x: left + topRadius, y: topRadius),
+                          control: CGPoint(x: left + topRadius, y: 0))
+        if bridge > 0 {
+            path.addLine(to: CGPoint(x: left + topRadius, y: bottom - bottomRadius))
+            path.addQuadCurve(to: CGPoint(x: left + topRadius + bottomRadius, y: bottom),
+                              control: CGPoint(x: left + topRadius, y: bottom))
+            path.addLine(to: CGPoint(x: right - topRadius - bottomRadius, y: bottom))
+            path.addQuadCurve(to: CGPoint(x: right - topRadius, y: bottom - bottomRadius),
+                              control: CGPoint(x: right - topRadius, y: bottom))
+        } else {
+            path.addLine(to: CGPoint(x: left + topRadius, y: hardwareHeight))
+            path.move(to: CGPoint(x: right - topRadius, y: hardwareHeight))
+        }
+        path.addLine(to: CGPoint(x: right - topRadius, y: topRadius))
+        path.addQuadCurve(to: CGPoint(x: right, y: 0),
+                          control: CGPoint(x: right - topRadius, y: 0))
+        return path
     }
 }
 
