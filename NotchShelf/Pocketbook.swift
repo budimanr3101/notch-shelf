@@ -92,14 +92,14 @@ private final class PocketbookModel: ObservableObject {
             base = entries.filter { $0.kind == kind }
         }
 
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return base }
+        let queryText = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !queryText.isEmpty else { return base }
 
         return base.filter {
-            $0.title.localizedCaseInsensitiveContains(q)
-                || $0.subtitle.localizedCaseInsensitiveContains(q)
-                || $0.keywords.localizedCaseInsensitiveContains(q)
-                || $0.content.localizedCaseInsensitiveContains(q)
+            $0.title.localizedCaseInsensitiveContains(queryText)
+                || $0.subtitle.localizedCaseInsensitiveContains(queryText)
+                || $0.keywords.localizedCaseInsensitiveContains(queryText)
+                || $0.content.localizedCaseInsensitiveContains(queryText)
         }
     }
 
@@ -120,6 +120,22 @@ private final class PocketbookModel: ObservableObject {
             guard self?.copiedID == entry.id else { return }
             self?.copiedID = nil
         }
+    }
+}
+
+private enum PocketbookLayout {
+    static let homeWingWidth: CGFloat = 96
+    static let detailWingWidth: CGFloat = 138
+    static let homeDepth: CGFloat = 188
+    static let detailDepth: CGFloat = 300
+    static let bottomSlack: CGFloat = 8
+
+    static func windowSize(for geometry: NotchGeometry) -> CGSize {
+        let width = geometry.hardwareWidth
+            + 2 * (detailWingWidth + NotchGeometry.topRadius)
+            + 24
+        let height = geometry.hardwareHeight + detailDepth + bottomSlack
+        return CGSize(width: width, height: height)
     }
 }
 
@@ -215,10 +231,8 @@ final class PocketbookFeature {
     func stop() {
         removeKeyMonitor()
         panel?.orderOut(nil)
-
         if let hotKey = hotKey { UnregisterEventHotKey(hotKey) }
         if let handler = handler { RemoveEventHandler(handler) }
-
         hotKey = nil
         handler = nil
         panel = nil
@@ -243,15 +257,12 @@ final class PocketbookFeature {
         model.reset()
         model.presented = false
 
-        let width = min(max(geometry.hardwareWidth + 300, 460), min(520, screen.frame.width - 24))
-        // The panel is only a transparent drawing envelope. The visible surface
-        // has separate home and detail depths inside this fixed frame.
-        let height = min(350, screen.frame.height * 0.60)
+        let size = PocketbookLayout.windowSize(for: geometry)
         let frame = NSRect(
-            x: screen.frame.midX - width / 2,
-            y: screen.frame.maxY - height,
-            width: width,
-            height: height
+            x: screen.frame.midX - size.width / 2,
+            y: screen.frame.maxY - size.height,
+            width: size.width,
+            height: size.height
         )
 
         panel?.orderOut(nil)
@@ -282,7 +293,7 @@ final class PocketbookFeature {
         let restore = previousApp
         previousApp = nil
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.46) { [weak self, weak panel] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.43) { [weak self, weak panel] in
             panel?.orderOut(nil)
             guard self?.panel === panel else { return }
             self?.panel = nil
@@ -345,7 +356,6 @@ final class PocketbookFeature {
 
     private func registerShortcut() -> OSStatus {
         guard handler != nil else { return OSStatus(eventNotHandledErr) }
-
         var ref: EventHotKeyRef?
         let id = EventHotKeyID(signature: signature, id: 1)
         let status = RegisterEventHotKey(
@@ -453,388 +463,336 @@ private struct PocketbookView: View {
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var tabSelection
-    @State private var shoulderProgress: CGFloat = 0
-    @State private var bridgeProgress: CGFloat = 0
-    @State private var contentReady = false
-    @State private var searchReady = false
-    @State private var rowsReady = false
+    @State private var surfaceOpen = false
+    @State private var contentVisible = false
 
-    private var visibleHeight: CGFloat {
-        min(model.selectedID == nil ? 260 : 338, 350)
+    private var isDetail: Bool {
+        return model.selectedID != nil
+    }
+
+    private var activeDepth: CGFloat {
+        return isDetail ? PocketbookLayout.detailDepth : PocketbookLayout.homeDepth
+    }
+
+    private var activeWingWidth: CGFloat {
+        return isDetail ? PocketbookLayout.detailWingWidth : PocketbookLayout.homeWingWidth
+    }
+
+    private var surface: PocketbookNotchWings {
+        return PocketbookNotchWings(
+            geometry: geometry,
+            expansion: surfaceOpen ? 1 : 0,
+            extraDepth: surfaceOpen ? activeDepth : 0,
+            wingWidth: surfaceOpen ? activeWingWidth : 0
+        )
     }
 
     var body: some View {
         ZStack(alignment: .top) {
-            chrome
+            surface
+                .fill(.black)
+                .shadow(
+                    color: surfaceOpen ? Color.black.opacity(0.34) : .clear,
+                    radius: 14,
+                    y: 5
+                )
 
             content
-                .opacity(contentReady ? 1 : 0)
-                .offset(y: reduceMotion || contentReady ? 0 : -6)
-                .mask(PocketbookNotchSurface(
-                    hardwareWidth: geometry.hardwareWidth,
-                    hardwareHeight: geometry.hardwareHeight,
-                    shoulderExpansion: shoulderProgress,
-                    bridgeExpansion: bridgeProgress,
-                    visibleHeight: visibleHeight
-                ))
-                .allowsHitTesting(contentReady && model.presented)
+                .opacity(contentVisible ? 1 : 0)
+                .offset(y: reduceMotion || contentVisible ? 0 : -5)
+                .mask(surface)
+                .allowsHitTesting(contentVisible && model.presented)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(
+            width: PocketbookLayout.windowSize(for: geometry).width,
+            height: PocketbookLayout.windowSize(for: geometry).height,
+            alignment: .top
+        )
+        .clipped()
+        .ignoresSafeArea()
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.84),
+            value: surfaceOpen
+        )
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86),
+            value: isDetail
+        )
         .onAppear {
             syncPresentation(model.presented)
         }
-        .onChange(of: model.presented) { value in
-            syncPresentation(value)
+        .onChange(of: model.presented) { visible in
+            syncPresentation(visible)
         }
-        .onChange(of: model.selectedID) { value in
-            if value != nil {
+        .onChange(of: model.selectedID) { selectedID in
+            if selectedID != nil {
                 searchFocused = false
             } else if model.presented {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                     searchFocused = true
                 }
             }
         }
     }
 
-    private var chrome: some View {
-        let shape = PocketbookNotchSurface(
-            hardwareWidth: geometry.hardwareWidth,
-            hardwareHeight: geometry.hardwareHeight,
-            shoulderExpansion: shoulderProgress,
-            bridgeExpansion: bridgeProgress,
-            visibleHeight: visibleHeight
-        )
-
-        return shape
-            .fill(Color(red: 0.025, green: 0.028, blue: 0.035))
-            .overlay {
-                PocketbookOuterEdge(
-                    hardwareWidth: geometry.hardwareWidth,
-                    hardwareHeight: geometry.hardwareHeight,
-                    shoulderExpansion: shoulderProgress,
-                    bridgeExpansion: bridgeProgress,
-                    visibleHeight: visibleHeight
-                )
-                .stroke(.white.opacity(0.13), lineWidth: 0.7)
+    private var content: some View {
+        Group {
+            if let entry = model.selected {
+                detail(entry)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        )
+                    )
+            } else {
+                home
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        )
+                    )
             }
-            .shadow(
-                color: .black.opacity(bridgeProgress > 0.6 ? 0.30 : 0),
-                radius: 13,
-                y: 5
-            )
-            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.89), value: visibleHeight)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, geometry.hardwareHeight + 5)
+        .frame(
+            width: PocketbookLayout.windowSize(for: geometry).width,
+            height: geometry.hardwareHeight + activeDepth,
+            alignment: .top
+        )
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88),
+            value: model.selectedID
+        )
     }
 
-    private var content: some View {
-        VStack(spacing: 6) {
-            if model.selectedID == nil {
-                header
-                searchBar
-                    .opacity(searchReady ? 1 : 0)
-                    .offset(y: reduceMotion || searchReady ? 0 : -4)
-                tabs
-                    .opacity(searchReady ? 1 : 0)
-                    .offset(y: reduceMotion || searchReady ? 0 : -4)
-            }
-
-            ZStack {
-                if let entry = model.selected {
-                    detail(entry)
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .trailing).combined(with: .opacity)
-                            )
-                        )
-                } else {
-                    results
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .leading).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            )
-                        )
-                }
-            }
-            .opacity(rowsReady ? 1 : 0)
-            .offset(y: reduceMotion || rowsReady ? 0 : -4)
-            .animation(
-                reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.88),
-                value: model.selectedID
-            )
-
+    private var home: some View {
+        VStack(spacing: 5) {
+            header
+            searchBar
+            tabs
+            results
         }
-        .padding(.horizontal, 18)
-        .padding(.top, geometry.hardwareHeight + 6)
-        .padding(.bottom, 8)
-        .frame(height: visibleHeight, alignment: .top)
-        .clipped()
-        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.89), value: visibleHeight)
     }
 
     private var header: some View {
-        HStack(spacing: 9) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.18))
-                    .frame(width: 24, height: 24)
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
+        HStack(spacing: 7) {
+            Image(systemName: "book.closed.fill")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Pocketbook")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.97))
-                Text("Kubernetes")
-                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
-            }
+            Text("Pocketbook")
+                .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.96))
+
+            Text("Kubernetes")
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.38))
 
             Spacer()
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9.5, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(.white.opacity(0.065)))
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.46))
+                    .frame(width: 21, height: 21)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
         }
-        .frame(height: 26)
+        .frame(height: 21)
     }
 
     private var searchBar: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.38))
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.34))
 
             TextField("Search Kubernetes…", text: $model.query)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.94))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.92))
 
             if !model.query.isEmpty {
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
+                    withAnimation(.easeOut(duration: 0.14)) {
                         model.query = ""
-                        model.selectedID = nil
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.white.opacity(0.30))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.26))
                 }
                 .buttonStyle(.plain)
-                .transition(.scale(scale: 0.72).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
+        .padding(.horizontal, 10)
+        .frame(height: 28)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(.white.opacity(searchFocused ? 0.085 : 0.060))
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.white.opacity(searchFocused ? 0.075 : 0.048))
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(
-                    searchFocused ? Color.white.opacity(0.20) : .white.opacity(0.06),
-                    lineWidth: 0.8
-                )
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(.white.opacity(searchFocused ? 0.12 : 0.045), lineWidth: 0.7)
         }
-        .animation(.easeInOut(duration: 0.18), value: searchFocused)
-        .animation(.easeInOut(duration: 0.16), value: model.query)
+        .animation(.easeInOut(duration: 0.16), value: searchFocused)
     }
 
     private var tabs: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 2) {
             ForEach(PocketbookKind.allCases) { kind in
                 Button {
-                    withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
                         model.kind = kind
-                        model.selectedID = nil
                     }
                 } label: {
                     ZStack {
                         if model.kind == kind {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.white.opacity(0.10))
+                            Capsule()
+                                .fill(.white.opacity(0.095))
                                 .matchedGeometryEffect(id: "PocketbookTab", in: tabSelection)
                         }
 
                         Text(kind.rawValue)
-                            .font(.system(size: 9.8, weight: .semibold, design: .rounded))
+                            .font(.system(size: 9.1, weight: .semibold, design: .rounded))
                             .foregroundStyle(
                                 model.kind == kind
-                                    ? Color.white.opacity(0.95)
-                                    : Color.white.opacity(0.40)
+                                    ? Color.white.opacity(0.91)
+                                    : Color.white.opacity(0.38)
                             )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 22)
+                    .frame(height: 20)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.white.opacity(0.025))
-        )
+        .frame(height: 20)
     }
 
     private var results: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 if model.results.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.22))
-                        Text("No reference found")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.38))
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 150)
+                    Text("No reference found")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.34))
+                        .frame(maxWidth: .infinity, minHeight: 90)
                 } else {
-                    ForEach(Array(model.results.enumerated()), id: \.element.id) { index, entry in
-                        resultRow(entry, index: index)
+                    ForEach(model.results) { entry in
+                        resultRow(entry)
                     }
                 }
             }
-            .padding(.vertical, 1)
         }
         .scrollIndicators(.never)
         .frame(maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.16), value: model.query)
-        .animation(.easeInOut(duration: 0.18), value: model.kind)
+        .animation(.easeInOut(duration: 0.16), value: model.kind)
     }
 
-    private func resultRow(_ entry: PocketbookEntry, index: Int) -> some View {
+    private func resultRow(_ entry: PocketbookEntry) -> some View {
         Button {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            withAnimation(.spring(response: 0.31, dampingFraction: 0.88)) {
                 model.selectedID = entry.id
             }
         } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(iconColor(entry.kind).opacity(0.11))
-                    Image(systemName: icon(entry.kind))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(iconColor(entry.kind))
-                }
-                .frame(width: 24, height: 24)
+            HStack(spacing: 8) {
+                Image(systemName: icon(entry.kind))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(iconColor(entry.kind))
+                    .frame(width: 18)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(entry.title)
-                        .font(.system(size: 11.3, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .font(.system(size: 10.8, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.91))
                         .lineLimit(1)
                     Text(entry.subtitle)
-                        .font(.system(size: 9.2, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .font(.system(size: 8.8, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.34))
                         .lineLimit(1)
                 }
 
-                Spacer(minLength: 8)
-
-                Text(entry.kind.rawValue)
-                    .font(.system(size: 8.3, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.28))
+                Spacer(minLength: 6)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.22))
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.18))
             }
-            .padding(.horizontal, 7)
-            .frame(height: 34)
+            .padding(.horizontal, 4)
+            .frame(height: 31)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(.white.opacity(0.055))
+                    .fill(.white.opacity(0.045))
                     .frame(height: 0.5)
             }
         }
         .buttonStyle(.plain)
-        .opacity(rowsReady ? 1 : 0)
-        .offset(y: rowsReady ? 0 : -4)
-        .animation(
-            reduceMotion
-                ? nil
-                : .easeOut(duration: 0.25).delay(min(Double(index) * 0.025, 0.15)),
-            value: rowsReady
-        )
     }
 
     private func detail(_ entry: PocketbookEntry) -> some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 8) {
+        VStack(spacing: 8) {
+            HStack(spacing: 7) {
                 Button {
                     withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
                         model.selectedID = nil
                     }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.70))
-                        .frame(width: 27, height: 27)
-                        .background(Circle().fill(.white.opacity(0.060)))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(entry.title)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.96))
                     Text(entry.subtitle)
-                        .font(.system(size: 9.3, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.40))
+                        .font(.system(size: 8.9, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.38))
                         .lineLimit(1)
                 }
 
                 Spacer()
 
                 Text(entry.kind.rawValue)
-                    .font(.system(size: 8.8, weight: .semibold, design: .rounded))
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(iconColor(entry.kind))
-                    .padding(.horizontal, 8)
-                    .frame(height: 21)
-                    .background(
-                        Capsule()
-                            .fill(iconColor(entry.kind).opacity(0.10))
-                    )
             }
+            .frame(height: 28)
 
             referenceBody(entry)
 
             HStack {
                 Button {
-                    withAnimation(.spring(response: 0.26, dampingFraction: 0.78)) {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
                         model.copy(entry)
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: model.copiedID == entry.id ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10, weight: .semibold))
                         Text(model.copiedID == entry.id ? "Copied" : "Copy")
                     }
-                    .font(.system(size: 10.2, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9.8, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         model.copiedID == entry.id
-                            ? Color.green.opacity(0.95)
-                            : Color.white.opacity(0.82)
+                            ? Color.green.opacity(0.94)
+                            : Color.white.opacity(0.78)
                     )
-                    .padding(.horizontal, 12)
-                    .frame(height: 29)
+                    .padding(.horizontal, 11)
+                    .frame(height: 27)
                     .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        Capsule()
                             .fill(model.copiedID == entry.id
-                                ? Color.green.opacity(0.11)
+                                ? Color.green.opacity(0.10)
                                 : Color.white.opacity(0.055))
                     )
                     .scaleEffect(model.copiedID == entry.id ? 1.03 : 1)
@@ -843,121 +801,95 @@ private struct PocketbookView: View {
 
                 Spacer()
 
-                Text("⌘C")
-                    .font(.system(size: 8.8, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.23))
+                Text("Esc Back   ·   ⌘C Copy")
+                    .font(.system(size: 8.1, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.22))
             }
         }
-        .frame(maxHeight: .infinity)
     }
 
     private func referenceBody(_ entry: PocketbookEntry) -> some View {
         ScrollView([.vertical, .horizontal]) {
             if entry.code {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(entry.content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { index, line in
-                        HStack(alignment: .firstTextBaseline, spacing: 11) {
+                    ForEach(
+                        Array(entry.content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()),
+                        id: \.offset
+                    ) { index, line in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text("\(index + 1)")
-                                .font(.system(size: 9.3, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.18))
+                                .font(.system(size: 8.8, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.17))
                                 .frame(width: 20, alignment: .trailing)
 
                             Text(String(line))
-                                .font(.system(size: 10.4, design: .monospaced))
+                                .font(.system(size: 10.1, design: .monospaced))
                                 .foregroundStyle(codeColor(for: String(line)))
                                 .textSelection(.enabled)
                         }
-                        .frame(minHeight: 17)
+                        .frame(minHeight: 16)
                     }
                 }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .padding(.horizontal, 8)
             } else {
                 Text(entry.content)
-                    .font(.system(size: 10.8, design: .rounded))
+                    .font(.system(size: 10.5, design: .rounded))
                     .foregroundStyle(.white.opacity(0.80))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(12)
+                    .padding(11)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.black.opacity(0.34))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.035))
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.white.opacity(0.055), lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.04), lineWidth: 0.6)
         }
     }
 
     private func syncPresentation(_ visible: Bool) {
         if visible {
             if reduceMotion {
-                shoulderProgress = 1
-                bridgeProgress = 1
-                contentReady = true
-                searchReady = true
-                rowsReady = true
+                surfaceOpen = true
+                contentVisible = true
                 searchFocused = true
                 return
             }
 
-            shoulderProgress = 0
-            bridgeProgress = 0
-            contentReady = false
-            searchReady = false
-            rowsReady = false
+            surfaceOpen = false
+            contentVisible = false
             searchFocused = false
 
             DispatchQueue.main.async {
-                withAnimation(.spring(response: 0.27, dampingFraction: 0.91)) {
-                    shoulderProgress = 1
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
+                    surfaceOpen = true
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.075) {
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
                 guard model.presented else { return }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.91)) {
-                    bridgeProgress = 1
+                withAnimation(.easeOut(duration: 0.16)) {
+                    contentVisible = true
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
-                guard model.presented else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    contentReady = true
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.21) {
-                guard model.presented else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    searchReady = true
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
-                guard model.presented else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    rowsReady = true
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
                 guard model.presented else { return }
                 searchFocused = true
             }
         } else {
             searchFocused = false
-            withAnimation(.easeOut(duration: reduceMotion ? 0.08 : 0.13)) {
-                contentReady = false
-                searchReady = false
-                rowsReady = false
+            withAnimation(.easeOut(duration: reduceMotion ? 0.08 : 0.10)) {
+                contentVisible = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.08 : 0.09)) {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.23, dampingFraction: 0.91)) {
-                    bridgeProgress = 0
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.08 : 0.23)) {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.20, dampingFraction: 0.93)) {
-                    shoulderProgress = 0
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.06 : 0.07)) {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88)) {
+                    surfaceOpen = false
                 }
             }
         }
@@ -979,149 +911,244 @@ private struct PocketbookView: View {
     private func iconColor(_ kind: PocketbookKind) -> Color {
         switch kind {
         case .yaml:
-            return Color.accentColor.opacity(0.90)
+            return Color.accentColor.opacity(0.84)
         case .kubectl:
-            return Color.green.opacity(0.82)
+            return Color.green.opacity(0.78)
         case .concepts:
-            return Color.orange.opacity(0.86)
+            return Color.orange.opacity(0.80)
         case .all:
-            return Color.white.opacity(0.68)
+            return Color.white.opacity(0.64)
         }
     }
 
     private func codeColor(for line: String) -> Color {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix("#") { return .white.opacity(0.34) }
-        if trimmed.hasPrefix("kubectl ") { return .green.opacity(0.88) }
+        if trimmed.hasPrefix("kubectl ") { return .green.opacity(0.86) }
         if trimmed.contains("apiVersion:") || trimmed.contains("kind:") {
-            return Color.accentColor.opacity(0.92)
+            return Color.accentColor.opacity(0.88)
         }
-        if trimmed.hasPrefix("-") { return .white.opacity(0.72) }
-        return .white.opacity(0.82)
+        if trimmed.hasPrefix("-") { return .white.opacity(0.70) }
+        return .white.opacity(0.81)
     }
 }
 
-private struct PocketbookNotchSurface: Shape {
-    let hardwareWidth: CGFloat
-    let hardwareHeight: CGFloat
-    var shoulderExpansion: CGFloat
-    var bridgeExpansion: CGFloat
-    var visibleHeight: CGFloat
+private struct PocketbookNotchWings: Shape {
+    let geometry: NotchGeometry
+    var expansion: CGFloat
+    var extraDepth: CGFloat
+    var wingWidth: CGFloat
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(shoulderExpansion, bridgeExpansion), visibleHeight) }
+        get {
+            return AnimatablePair(
+                AnimatablePair(expansion, extraDepth),
+                wingWidth
+            )
+        }
         set {
-            shoulderExpansion = newValue.first.first
-            bridgeExpansion = newValue.first.second
-            visibleHeight = newValue.second
+            expansion = newValue.first.first
+            extraDepth = newValue.first.second
+            wingWidth = newValue.second
         }
     }
 
     func path(in rect: CGRect) -> Path {
-        let shoulder = min(max(shoulderExpansion, 0), 1)
-        let bridge = min(max(bridgeExpansion, 0), 1)
-        guard shoulder > 0 || bridge > 0 else { return Path() }
+        guard expansion > 0 else { return Path() }
 
-        let extent = max(0, (rect.width - hardwareWidth) / 2 - 5) * shoulder
-        let left = rect.midX - hardwareWidth / 2 - extent
-        let right = rect.midX + hardwareWidth / 2 + extent
-        let depth = max(0, visibleHeight - hardwareHeight) * bridge
-        let bottom = hardwareHeight + depth
-        let topRadius = min(8, extent)
-        let bottomRadius = min(18, depth / 2, (right - left) / 4)
+        let progress = min(max(expansion, 0), 1.08)
+        let extent = max(0, wingWidth) * progress
+        let overlap = NotchGeometry.connectionOverlap * min(progress, 1)
+        let maximumDepth = max(0, rect.height - geometry.hardwareHeight)
+        let depth = min(max(extraDepth, 0), maximumDepth)
+        let renderedHeight = geometry.hardwareHeight + depth
 
-        // One outer contour keeps the two wings and the lower bridge aligned.
-        // The mask removes the unrenderable hardware area above the bridge.
-        var contour = Path()
-        contour.move(to: CGPoint(x: left, y: 0))
-        contour.addLine(to: CGPoint(x: right, y: 0))
-        contour.addQuadCurve(
-            to: CGPoint(x: right - topRadius, y: topRadius),
-            control: CGPoint(x: right - topRadius, y: 0)
-        )
-        contour.addLine(to: CGPoint(x: right - topRadius, y: bottom - bottomRadius))
-        contour.addQuadCurve(
-            to: CGPoint(x: right - topRadius - bottomRadius, y: bottom),
-            control: CGPoint(x: right - topRadius, y: bottom)
-        )
-        contour.addLine(to: CGPoint(x: left + topRadius + bottomRadius, y: bottom))
-        contour.addQuadCurve(
-            to: CGPoint(x: left + topRadius, y: bottom - bottomRadius),
-            control: CGPoint(x: left + topRadius, y: bottom)
-        )
-        contour.addLine(to: CGPoint(x: left + topRadius, y: topRadius))
-        contour.addQuadCurve(
-            to: CGPoint(x: left, y: 0),
-            control: CGPoint(x: left + topRadius, y: 0)
-        )
-        contour.closeSubpath()
+        let leftHardwareEdge = rect.midX - geometry.hardwareWidth / 2
+        let rightHardwareEdge = rect.midX + geometry.hardwareWidth / 2
 
-        let hardwareLeft = rect.midX - hardwareWidth / 2
-        let hardwareRight = rect.midX + hardwareWidth / 2
-        let overlap = NotchGeometry.connectionOverlap * shoulder
-        var drawable = Path()
-        drawable.addRect(CGRect(x: left, y: 0,
-                                width: hardwareLeft + overlap - left,
-                                height: hardwareHeight))
-        drawable.addRect(CGRect(x: hardwareRight - overlap, y: 0,
-                                width: right - hardwareRight + overlap,
-                                height: hardwareHeight))
+        let silhouette = PocketbookShelfShape(
+            topRadius: NotchGeometry.topRadius,
+            bottomRadius: NotchGeometry.bottomRadius
+        )
+        .path(in: CGRect(
+            x: leftHardwareEdge - extent - NotchGeometry.topRadius,
+            y: rect.minY,
+            width: geometry.hardwareWidth + 2 * (extent + NotchGeometry.topRadius),
+            height: renderedHeight
+        ))
+
+        let leftJoin = leftHardwareEdge + overlap
+        let rightJoin = rightHardwareEdge - overlap
+
+        var drawableRegions = Path()
+        drawableRegions.addRect(CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: max(0, leftJoin - rect.minX),
+            height: geometry.hardwareHeight
+        ))
+        drawableRegions.addRect(CGRect(
+            x: rightJoin,
+            y: rect.minY,
+            width: max(0, rect.maxX - rightJoin),
+            height: geometry.hardwareHeight
+        ))
+
         if depth > 0 {
-            drawable.addRect(CGRect(x: left, y: hardwareHeight - 1,
-                                    width: right - left, height: depth + 1))
+            let bridgeLeft = leftHardwareEdge - extent - NotchGeometry.topRadius
+            let bridgeRight = rightHardwareEdge + extent + NotchGeometry.topRadius
+            drawableRegions.addRect(CGRect(
+                x: bridgeLeft,
+                y: geometry.hardwareHeight - 1,
+                width: bridgeRight - bridgeLeft,
+                height: depth + 1
+            ))
         }
-        return contour.intersection(drawable)
+
+        let flare = NotchGeometry.topRadius * min(progress, 1)
+        let bounds = Path(CGRect(
+            x: leftHardwareEdge - extent - flare,
+            y: rect.minY,
+            width: geometry.hardwareWidth + 2 * (extent + flare),
+            height: renderedHeight
+        ))
+
+        return silhouette
+            .intersection(drawableRegions)
+            .intersection(bounds)
     }
 }
 
-/// Only the display-renderable outer perimeter gets an edge. In particular,
-/// nothing is stroked across the physical camera housing or its overlap mask.
-private struct PocketbookOuterEdge: Shape {
-    let hardwareWidth: CGFloat
-    let hardwareHeight: CGFloat
-    var shoulderExpansion: CGFloat
-    var bridgeExpansion: CGFloat
-    var visibleHeight: CGFloat
+private struct PocketbookShelfShape: Shape {
+    var topRadius: CGFloat
+    var bottomRadius: CGFloat
 
-    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(shoulderExpansion, bridgeExpansion), visibleHeight) }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { return AnimatablePair(topRadius, bottomRadius) }
         set {
-            shoulderExpansion = newValue.first.first
-            bridgeExpansion = newValue.first.second
-            visibleHeight = newValue.second
+            topRadius = newValue.first
+            bottomRadius = newValue.second
         }
     }
 
     func path(in rect: CGRect) -> Path {
-        let shoulder = min(max(shoulderExpansion, 0), 1)
-        let bridge = min(max(bridgeExpansion, 0), 1)
-        guard shoulder > 0 else { return Path() }
+        let top = max(0, min(topRadius, rect.width / 2))
+        let bodyHalfWidth = max(0, rect.width / 2 - top)
+        let bottom = max(0, min(bottomRadius, min(bodyHalfWidth, rect.height)))
 
-        let extent = max(0, (rect.width - hardwareWidth) / 2 - 5) * shoulder
-        let left = rect.midX - hardwareWidth / 2 - extent
-        let right = rect.midX + hardwareWidth / 2 + extent
-        let bottom = hardwareHeight + max(0, visibleHeight - hardwareHeight) * bridge
-        let topRadius = min(8, extent)
-        let bottomRadius = min(18, (bottom - hardwareHeight) / 2)
         var path = Path()
-        path.move(to: CGPoint(x: left, y: 0))
-        path.addQuadCurve(to: CGPoint(x: left + topRadius, y: topRadius),
-                          control: CGPoint(x: left + topRadius, y: 0))
-        if bridge > 0 {
-            path.addLine(to: CGPoint(x: left + topRadius, y: bottom - bottomRadius))
-            path.addQuadCurve(to: CGPoint(x: left + topRadius + bottomRadius, y: bottom),
-                              control: CGPoint(x: left + topRadius, y: bottom))
-            path.addLine(to: CGPoint(x: right - topRadius - bottomRadius, y: bottom))
-            path.addQuadCurve(to: CGPoint(x: right - topRadius, y: bottom - bottomRadius),
-                              control: CGPoint(x: right - topRadius, y: bottom))
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + top, y: rect.minY + top),
+            control: CGPoint(x: rect.minX + top, y: rect.minY)
+        )
+
+        let bodyRect = CGRect(
+            x: rect.minX + top,
+            y: rect.minY,
+            width: rect.width - 2 * top,
+            height: rect.height
+        )
+
+        if let corners = PocketbookContinuousCorner.bottomCorners(
+            bodyRect: bodyRect,
+            radius: bottom
+        ) {
+            path.addLine(to: corners.leftEdgeReach)
+            for segment in corners.left {
+                path.addCurve(
+                    to: segment.to,
+                    control1: segment.control1,
+                    control2: segment.control2
+                )
+            }
+
+            path.addLine(to: corners.bottomEdgeRightReach)
+            for segment in corners.right {
+                path.addCurve(
+                    to: segment.to,
+                    control1: segment.control1,
+                    control2: segment.control2
+                )
+            }
+
+            path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
         } else {
-            path.addLine(to: CGPoint(x: left + topRadius, y: hardwareHeight))
-            path.move(to: CGPoint(x: right - topRadius, y: hardwareHeight))
+            path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX + top + bottom, y: rect.maxY),
+                control: CGPoint(x: rect.minX + top, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX - top - bottom, y: rect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.maxX - top, y: rect.maxY - bottom),
+                control: CGPoint(x: rect.maxX - top, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
         }
-        path.addLine(to: CGPoint(x: right - topRadius, y: topRadius))
-        path.addQuadCurve(to: CGPoint(x: right, y: 0),
-                          control: CGPoint(x: right - topRadius, y: 0))
+
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.maxX - top, y: rect.minY)
+        )
+        path.closeSubpath()
         return path
+    }
+}
+
+private enum PocketbookContinuousCorner {
+    struct Segment {
+        let control1: CGPoint
+        let control2: CGPoint
+        let to: CGPoint
+    }
+
+    struct BottomCorners {
+        let leftEdgeReach: CGPoint
+        let left: [Segment]
+        let bottomEdgeRightReach: CGPoint
+        let right: [Segment]
+    }
+
+    static func bottomCorners(bodyRect: CGRect, radius: CGFloat) -> BottomCorners? {
+        let reference = UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: radius,
+            bottomTrailingRadius: radius,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
+        .path(in: bodyRect)
+
+        var elements: [Path.Element] = []
+        reference.forEach { elements.append($0) }
+
+        guard elements.count >= 9,
+              case .line(let p1) = elements[1],
+              case .curve(let p2, let c2a, let c2b) = elements[2],
+              case .curve(let p3, let c3a, let c3b) = elements[3],
+              case .curve(let p4, let c4a, let c4b) = elements[4],
+              case .line(let l5) = elements[5],
+              case .curve(let p6, let c6a, let c6b) = elements[6],
+              case .curve(let p7, let c7a, let c7b) = elements[7],
+              case .curve(let p8, let c8a, let c8b) = elements[8] else {
+            return nil
+        }
+
+        return BottomCorners(
+            leftEdgeReach: p8,
+            left: [
+                Segment(control1: c8b, control2: c8a, to: p7),
+                Segment(control1: c7b, control2: c7a, to: p6),
+                Segment(control1: c6b, control2: c6a, to: l5),
+            ],
+            bottomEdgeRightReach: p4,
+            right: [
+                Segment(control1: c4b, control2: c4a, to: p3),
+                Segment(control1: c3b, control2: c3a, to: p2),
+                Segment(control1: c2b, control2: c2a, to: p1),
+            ]
+        )
     }
 }
 
@@ -1205,7 +1232,7 @@ private enum PocketbookLibrary {
     }
 
     static let kubernetes: [PocketbookEntry] = [
-        e("deployment", .yaml, "Deployment YAML", "Basic stateless workload boilerplate",
+        e("deployment", .yaml, "Deployment YAML", "Stateless workload boilerplate",
           "deployment apps replicas selector resources", """
 apiVersion: apps/v1
 kind: Deployment
@@ -1268,7 +1295,7 @@ spec:
                 port:
                   number: 80
 """),
-        e("configmap", .yaml, "ConfigMap YAML", "Non-secret configuration boilerplate",
+        e("configmap", .yaml, "ConfigMap YAML", "Non-secret configuration",
           "configmap env configuration", """
 apiVersion: v1
 kind: ConfigMap
@@ -1379,7 +1406,7 @@ spec:
           type: Utilization
           averageUtilization: 70
 """),
-        e("pods", .kubectl, "Pods: inspect quickly", "Get, wide, YAML and describe",
+        e("pods", .kubectl, "Pods", "Get, wide, YAML and describe",
           "pods get describe wide", """
 kubectl get pods
 kubectl get pods -o wide
@@ -1409,7 +1436,7 @@ kubectl rollout restart deployment/<name>
 kubectl rollout history deployment/<name>
 kubectl rollout undo deployment/<name>
 """),
-        e("scale", .kubectl, "Scale workload", "Change Deployment or StatefulSet replicas",
+        e("scale", .kubectl, "Scale workload", "Deployment or StatefulSet replicas",
           "scale replicas deployment statefulset", """
 kubectl scale deployment/<name> --replicas=3
 kubectl scale statefulset/<name> --replicas=3
@@ -1422,7 +1449,7 @@ kubectl config use-context <context>
 kubectl config set-context --current --namespace=<namespace>
 kubectl config view --minify
 """),
-        e("events", .kubectl, "Events", "First stop for many workload failures",
+        e("events", .kubectl, "Events", "Useful first stop for workload failures",
           "events warning troubleshoot", """
 kubectl get events
 kubectl get events --sort-by=.lastTimestamp
