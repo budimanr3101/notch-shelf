@@ -527,7 +527,7 @@ private struct PocketbookView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 6) {
             if model.selectedID == nil {
                 header
                 searchBar
@@ -566,8 +566,8 @@ private struct PocketbookView: View {
 
         }
         .padding(.horizontal, 18)
-        .padding(.top, geometry.hardwareHeight + 10)
-        .padding(.bottom, 14)
+        .padding(.top, geometry.hardwareHeight + 6)
+        .padding(.bottom, 8)
         .frame(height: visibleHeight, alignment: .top)
         .clipped()
         .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.89), value: visibleHeight)
@@ -578,7 +578,7 @@ private struct PocketbookView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.accentColor.opacity(0.18))
-                    .frame(width: 28, height: 28)
+                    .frame(width: 24, height: 24)
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
@@ -605,7 +605,7 @@ private struct PocketbookView: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(height: 31)
+        .frame(height: 26)
     }
 
     private var searchBar: some View {
@@ -635,7 +635,7 @@ private struct PocketbookView: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 36)
+        .frame(height: 30)
         .background(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(.white.opacity(searchFocused ? 0.085 : 0.060))
@@ -662,8 +662,8 @@ private struct PocketbookView: View {
                 } label: {
                     ZStack {
                         if model.kind == kind {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.accentColor.opacity(0.34))
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.white.opacity(0.10))
                                 .matchedGeometryEffect(id: "PocketbookTab", in: tabSelection)
                         }
 
@@ -676,15 +676,15 @@ private struct PocketbookView: View {
                             )
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 28)
+                    .frame(height: 22)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
+        .padding(2)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.white.opacity(0.040))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.white.opacity(0.025))
         )
     }
 
@@ -729,7 +729,7 @@ private struct PocketbookView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(iconColor(entry.kind))
                 }
-                .frame(width: 29, height: 29)
+                .frame(width: 24, height: 24)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title)
@@ -753,11 +753,12 @@ private struct PocketbookView: View {
                     .foregroundStyle(.white.opacity(0.22))
             }
             .padding(.horizontal, 7)
-            .frame(height: 42)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(.white.opacity(0.018))
-            )
+            .frame(height: 34)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(.white.opacity(0.055))
+                    .frame(height: 0.5)
+            }
         }
         .buttonStyle(.plain)
         .opacity(rowsReady ? 1 : 0)
