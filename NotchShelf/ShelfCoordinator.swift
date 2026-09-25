@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 
+@MainActor
 final class ShelfCoordinator {
     private let store = ShelfStore()
     private let finder = FinderBridge()
