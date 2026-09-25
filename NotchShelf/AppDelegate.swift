@@ -38,10 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clear.target = self
         menu.addItem(clear)
 
-        let permissions = NSMenuItem(title: "Request Keyboard Permissions", action: #selector(requestKeyboardPermissions), keyEquivalent: "")
-        permissions.target = self
-        menu.addItem(permissions)
-
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit NotchShelf", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -66,10 +62,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func clearShelf() {
         coordinator.clearShelf()
-    }
-
-    @objc private func requestKeyboardPermissions() {
-        ShortcutMonitor.requestPermissions()
-        ShortcutMonitor.logPermissionStatus()
     }
 }
