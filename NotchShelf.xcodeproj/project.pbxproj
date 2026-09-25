@@ -17,6 +17,7 @@
 		A10000000000000000000008 /* NotchOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* NotchOverlayController.swift */; };
 		A10000000000000000000009 /* NotchShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* NotchShelfView.swift */; };
 		A1000000000000000000000C /* Pocketbook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* Pocketbook.swift */; };
+		A1000000000000000000000D /* PocketbookV3.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* PocketbookV3.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		B1000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1000000000000000000000B /* NotchShelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotchShelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000C /* Pocketbook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pocketbook.swift; sourceTree = "<group>"; };
+		B1000000000000000000000D /* PocketbookV3.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookV3.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -66,6 +68,7 @@
 				B10000000000000000000008 /* NotchOverlayController.swift */,
 				B10000000000000000000009 /* NotchShelfView.swift */,
 				B1000000000000000000000C /* Pocketbook.swift */,
+				B1000000000000000000000D /* PocketbookV3.swift */,
 				B1000000000000000000000A /* Info.plist */,
 			);
 			path = NotchShelf;
@@ -157,6 +160,7 @@
 				A10000000000000000000008 /* NotchOverlayController.swift in Sources */,
 				A10000000000000000000009 /* NotchShelfView.swift in Sources */,
 				A1000000000000000000000C /* Pocketbook.swift in Sources */,
+				A1000000000000000000000D /* PocketbookV3.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
