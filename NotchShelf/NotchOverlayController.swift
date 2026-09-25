@@ -31,10 +31,10 @@ struct NotchGeometry: Equatable {
     // exposes a bright hairline between the hardware notch and software wings.
     static let connectionOverlap: CGFloat = 14
 
-    // Staged gets just enough depth for a filename. Moving/success opens a few
-    // more points for the animated progress rail.
-    static let labelDepth: CGFloat = 13
-    static let progressDepth: CGFloat = 20
+    // Give the staged filename a real readable strip. Moving/success opens a bit
+    // farther for a status label plus progress rail.
+    static let labelDepth: CGFloat = 17
+    static let progressDepth: CGFloat = 23
     static let progressBottomSlack: CGFloat = 2
 
     var expandedWidth: CGFloat {
@@ -102,6 +102,11 @@ private final class NotchWindow: NSPanel {
         // below the physical notch and create the detached-pill look.
         hosting.safeAreaRegions = []
         hosting.sizingOptions = []
+        // Make the hosting surface explicitly fill the fixed transparent envelope.
+        // Without this, the lower filename/progress footer can be clipped by the
+        // hosting view's content-driven size even though the NSPanel is tall enough.
+        hosting.frame = NSRect(origin: .zero, size: geometry.windowSize)
+        hosting.autoresizingMask = [.width, .height]
         contentView = hosting
     }
 }
@@ -150,6 +155,7 @@ final class NotchOverlayController {
         model.itemLabel = label(for: items)
         model.fileIcon = fileIcon(for: items)
         model.visualProgress = 0
+        NSLog("[NotchShelf] Staged label: %@", model.itemLabel)
         revealFromHardwareNotchIfNeeded()
     }
 
