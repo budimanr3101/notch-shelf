@@ -50,9 +50,9 @@ private struct NotchHardwareGeometry {
 
 @MainActor
 final class NotchOverlayController {
-    // Fixed envelope. Like Glance, this window never resizes; SwiftUI animates
-    // only the notch extension inside it. Must match NotchShelfView.Metrics.windowSize.
-    private static let panelSize = CGSize(width: 400, height: 96)
+    // Horizontal-only envelope. The rendered silhouette is always exactly the
+    // physical notch height; this extra transparent height is only safety margin.
+    private static let panelSize = CGSize(width: 400, height: 64)
 
     private let model = NotchOverlayModel()
     private let panel: NSPanel
@@ -107,7 +107,7 @@ final class NotchOverlayController {
 
         model.state = .success
         model.itemCount = count
-        model.fileIcon = nil
+        // Keep the staged file icon on the left. Only the right-side status changes.
         revealFromHardwareNotchIfNeeded()
         scheduleDismiss(after: 0.72)
     }
@@ -118,7 +118,9 @@ final class NotchOverlayController {
 
         model.state = .failure
         model.itemCount = remainingItems.count
-        model.fileIcon = nil
+        if !remainingItems.isEmpty {
+            model.fileIcon = fileIcon(for: remainingItems)
+        }
         revealFromHardwareNotchIfNeeded()
 
         guard !remainingItems.isEmpty else {
@@ -160,9 +162,8 @@ final class NotchOverlayController {
             return
         }
 
-        // First frame is fully transparent because NotchShelfView subtracts the
-        // closed physical-notch path from itself. Next run-loop turn expands only
-        // the pixels outside that real notch footprint.
+        // First frame has zero software extension. On the next run-loop turn the
+        // view widens left/right while keeping exactly the same hardware height.
         model.presented = false
         panel.orderFrontRegardless()
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -180,7 +181,7 @@ final class NotchOverlayController {
             self?.panel.orderOut(nil)
         }
         closeTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34, execute: work)
     }
 
     private func positionPanel(on screen: NSScreen) {
@@ -221,7 +222,7 @@ final class NotchOverlayController {
     private func fileIcon(for items: [URL]) -> NSImage? {
         guard items.count == 1, let url = items.first else { return nil }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: 20, height: 20)
+        icon.size = NSSize(width: 18, height: 18)
         return icon
     }
 
