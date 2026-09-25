@@ -3,91 +3,70 @@ import SwiftUI
 
 struct NotchShelfView: View {
     @ObservedObject var model: NotchOverlayModel
-
-    private enum Metrics {
-        // Horizontal-only mode: the software extension is never taller than the
-        // physical notch. These radii intentionally stay identical while opening.
-        static let topRadius: CGFloat = 8
-        static let bottomRadius: CGFloat = 12
-        static let flankWidth: CGFloat = 54
-        static let contentWidth: CGFloat = 40
-        static let contentEdgeInset: CGFloat = 4
-        static let windowSize = CGSize(width: 400, height: 64)
-
-        static let openResponse: Double = 0.34
-        static let openDamping: Double = 0.82
-        static let closeResponse: Double = 0.28
-        static let closeDamping: Double = 1.0
-    }
-
-    private var bodyWidth: CGFloat {
-        model.hardwareWidth + (model.presented ? Metrics.flankWidth * 2 : 0)
-    }
-
-    // Critical invariant: NotchShelf never grows downward.
-    private var bodyHeight: CGFloat {
-        model.hardwareHeight
-    }
-
-    private var currentSize: CGSize {
-        CGSize(
-            width: bodyWidth + Metrics.topRadius * 2,
-            height: bodyHeight
-        )
-    }
-
-    private var closedSilhouetteSize: CGSize {
-        CGSize(
-            width: model.hardwareWidth + Metrics.topRadius * 2,
-            height: model.hardwareHeight
-        )
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack(alignment: .top) {
-            NotchExtensionLayer(
-                topRadius: Metrics.topRadius,
-                bottomRadius: Metrics.bottomRadius,
-                closedSilhouetteSize: closedSilhouetteSize
+        if let geometry = model.geometry {
+            let wings = NotchWings(
+                geometry: geometry,
+                expansion: model.presented ? 1 : 0
             )
-            .frame(width: currentSize.width, height: currentSize.height)
 
-            if model.presented {
-                flankContent
-                    .frame(width: currentSize.width, height: currentSize.height)
-                    .transition(.opacity)
+            ZStack(alignment: .top) {
+                wings.fill(.black)
+
+                HStack(spacing: 0) {
+                    leftStatus
+                        .frame(width: NotchGeometry.wingWidth)
+
+                    Color.clear
+                        .frame(width: geometry.hardwareWidth)
+
+                    rightStatus
+                        .frame(width: NotchGeometry.wingWidth)
+                }
+                .frame(height: geometry.hardwareHeight)
+                .opacity(model.presented ? 1 : 0)
+                .frame(width: geometry.windowSize.width, alignment: .center)
+                // Status content must never leak into the hardware-notch center.
+                .mask(wings)
             }
+            .frame(
+                width: geometry.windowSize.width,
+                height: geometry.hardwareHeight,
+                alignment: .top
+            )
+            .clipped()
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .spring(
+                        response: 0.4,
+                        dampingFraction: model.presented ? 0.82 : 1.0
+                    ),
+                value: model.presented
+            )
+            .animation(.smooth(duration: 0.14), value: model.state)
+            .ignoresSafeArea()
         }
-        .frame(width: currentSize.width, height: currentSize.height, alignment: .top)
-        .animation(
-            model.presented
-                ? .spring(response: Metrics.openResponse, dampingFraction: Metrics.openDamping)
-                : .spring(response: Metrics.closeResponse, dampingFraction: Metrics.closeDamping),
-            value: model.presented
-        )
-        .animation(.smooth(duration: 0.14), value: model.state)
-        .frame(
-            width: Metrics.windowSize.width,
-            height: Metrics.windowSize.height,
-            alignment: .top
-        )
     }
 
-    // Layout is deliberately [small icon] [real hardware notch] [small status].
-    // The center remains empty and transparent in software.
-    private var flankContent: some View {
-        HStack(spacing: 0) {
+    @ViewBuilder
+    private var leftStatus: some View {
+        switch model.state {
+        case .success:
+            Image(systemName: "checkmark")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.green)
+
+        case .failure:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.orange)
+
+        case .staged, .moving:
             stagedIcon(size: 17)
-                .frame(width: Metrics.contentWidth, height: bodyHeight)
-
-            Spacer(minLength: 0)
-
-            rightStatus
-                .frame(width: Metrics.contentWidth, height: bodyHeight)
         }
-        .padding(.horizontal, Metrics.contentEdgeInset + Metrics.topRadius)
-        .frame(width: currentSize.width, height: bodyHeight)
-        .foregroundStyle(.white)
     }
 
     @ViewBuilder
@@ -110,16 +89,14 @@ struct NotchShelfView: View {
                 .tint(.white)
 
         case .success:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
+            Image(systemName: "tray.fill")
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.green)
-                .contentTransition(.symbolEffect(.replace))
 
         case .failure:
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.red)
-                .contentTransition(.symbolEffect(.replace))
         }
     }
 
@@ -140,45 +117,84 @@ struct NotchShelfView: View {
     }
 }
 
-/// Draws only the extra pixels outside the physical notch footprint. The center
-/// is punched out, so NotchShelf never paints a second black notch behind the
-/// real camera housing.
-private struct NotchExtensionLayer: View {
-    let topRadius: CGFloat
-    let bottomRadius: CGFloat
-    let closedSilhouetteSize: CGSize
+/// Horizontal-only software wings around the real camera cutout.
+///
+/// The old implementation rendered one full black shape and punched an assumed
+/// notch silhouette out of the center. This version never creates that center
+/// shape at all. Only the left and right wing regions are drawable.
+///
+/// A small overlap is intentional: the measured AppKit auxiliary-area boundary
+/// and the visible antialiased edge of the physical notch are not pixel-identical.
+/// Extending each wing a few points under the hardware edge hides the bright seam
+/// without turning the center into another software pill.
+struct NotchWings: Shape {
+    let geometry: NotchGeometry
+    var expansion: CGFloat
 
-    var body: some View {
-        Canvas { context, size in
-            let expandedPath = NotchShelfShape(
-                topRadius: topRadius,
-                bottomRadius: bottomRadius
-            ).path(in: CGRect(origin: .zero, size: size))
+    var animatableData: CGFloat {
+        get { expansion }
+        set { expansion = newValue }
+    }
 
-            context.fill(expandedPath, with: .color(.black))
+    func path(in rect: CGRect) -> Path {
+        guard expansion > 0 else { return Path() }
 
-            let closedRect = CGRect(
-                x: (size.width - closedSilhouetteSize.width) / 2,
-                y: 0,
-                width: closedSilhouetteSize.width,
-                height: closedSilhouetteSize.height
-            )
-            let closedPath = NotchShelfShape(
-                topRadius: topRadius,
-                bottomRadius: bottomRadius
-            ).path(in: closedRect)
+        let progress = min(max(expansion, 0), 1.08)
+        let extent = NotchGeometry.wingWidth * progress
+        let overlap = NotchGeometry.connectionOverlap * min(progress, 1)
 
-            context.blendMode = .destinationOut
-            context.fill(closedPath, with: .color(.black))
-        }
-        .compositingGroup()
-        .allowsHitTesting(false)
+        let leftHardwareEdge = rect.midX - geometry.hardwareWidth / 2
+        let rightHardwareEdge = rect.midX + geometry.hardwareWidth / 2
+
+        let silhouette = NotchShelfShape(
+            topRadius: NotchGeometry.topRadius,
+            bottomRadius: NotchGeometry.bottomRadius
+        )
+        .path(in: CGRect(
+            x: leftHardwareEdge - extent - NotchGeometry.topRadius,
+            y: rect.minY,
+            width: geometry.hardwareWidth + 2 * (extent + NotchGeometry.topRadius),
+            height: geometry.hardwareHeight
+        ))
+
+        // The wing masks stop slightly INSIDE the measured physical-notch edges.
+        // This 6pt bleed is what removes the visible separator line at the join.
+        let leftJoin = leftHardwareEdge + overlap
+        let rightJoin = rightHardwareEdge - overlap
+
+        var wingRegions = Path()
+        wingRegions.addRect(CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: max(0, leftJoin - rect.minX),
+            height: geometry.hardwareHeight
+        ))
+        wingRegions.addRect(CGRect(
+            x: rightJoin,
+            y: rect.minY,
+            width: max(0, rect.maxX - rightJoin),
+            height: geometry.hardwareHeight
+        ))
+
+        // Crop the outer flare as expansion approaches zero, ensuring the idle
+        // state has literally zero software pixels.
+        let flare = NotchGeometry.topRadius * min(progress, 1)
+        let bounds = Path(CGRect(
+            x: leftHardwareEdge - extent - flare,
+            y: rect.minY,
+            width: geometry.hardwareWidth + 2 * (extent + flare),
+            height: geometry.hardwareHeight
+        ))
+
+        return silhouette
+            .intersection(wingRegions)
+            .intersection(bounds)
     }
 }
 
-/// Port of the physical-notch silhouette approach used by jonnyoo/glance (MIT).
-/// It keeps concave top flares and continuous bottom corners, but in NotchShelf
-/// the silhouette only widens; its height never changes.
+/// Physical-notch silhouette adapted from jonnyoo/glance's MIT-licensed shape.
+/// Concave top flares blend into the menu-bar edge; bottom corners use SwiftUI's
+/// continuous-corner geometry rather than a capsule.
 private struct NotchShelfShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
@@ -210,15 +226,28 @@ private struct NotchShelfShape: Shape {
             height: rect.height
         )
 
-        if let corners = ContinuousNotchCorner.bottomCorners(bodyRect: bodyRect, radius: bottom) {
+        if let corners = ContinuousNotchCorner.bottomCorners(
+            bodyRect: bodyRect,
+            radius: bottom
+        ) {
             path.addLine(to: corners.leftEdgeReach)
             for segment in corners.left {
-                path.addCurve(to: segment.to, control1: segment.control1, control2: segment.control2)
+                path.addCurve(
+                    to: segment.to,
+                    control1: segment.control1,
+                    control2: segment.control2
+                )
             }
+
             path.addLine(to: corners.bottomEdgeRightReach)
             for segment in corners.right {
-                path.addCurve(to: segment.to, control1: segment.control1, control2: segment.control2)
+                path.addCurve(
+                    to: segment.to,
+                    control1: segment.control1,
+                    control2: segment.control2
+                )
             }
+
             path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
         } else {
             path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
@@ -239,6 +268,7 @@ private struct NotchShelfShape: Shape {
             control: CGPoint(x: rect.maxX - top, y: rect.minY)
         )
         path.closeSubpath()
+
         return path
     }
 }
@@ -264,7 +294,8 @@ private enum ContinuousNotchCorner {
             bottomTrailingRadius: radius,
             topTrailingRadius: 0,
             style: .continuous
-        ).path(in: bodyRect)
+        )
+        .path(in: bodyRect)
 
         var elements: [Path.Element] = []
         reference.forEach { elements.append($0) }
@@ -277,8 +308,9 @@ private enum ContinuousNotchCorner {
               case .line(let l5) = elements[5],
               case .curve(let p6, let c6a, let c6b) = elements[6],
               case .curve(let p7, let c7a, let c7b) = elements[7],
-              case .curve(let p8, let c8a, let c8b) = elements[8]
-        else { return nil }
+              case .curve(let p8, let c8a, let c8b) = elements[8] else {
+            return nil
+        }
 
         return BottomCorners(
             leftEdgeReach: p8,
