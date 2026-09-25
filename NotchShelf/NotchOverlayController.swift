@@ -16,6 +16,7 @@ final class NotchOverlayModel: ObservableObject {
     @Published var geometry: NotchGeometry?
     @Published var fileIcon: NSImage?
     @Published var visualProgress: CGFloat = 0
+    @Published var itemLabel = ""
 }
 
 struct NotchGeometry: Equatable {
@@ -25,17 +26,23 @@ struct NotchGeometry: Equatable {
     static let wingWidth: CGFloat = 42
     static let topRadius: CGFloat = 8
     static let bottomRadius: CGFloat = 12
-    static let connectionOverlap: CGFloat = 10
-    static let progressDepth: CGFloat = 10
+
+    // Bleed slightly beneath the physical cutout edge so antialiasing never
+    // exposes a bright hairline between the hardware notch and software wings.
+    static let connectionOverlap: CGFloat = 14
+
+    // Staged gets just enough depth for a filename. Moving/success opens a few
+    // more points for the animated progress rail.
+    static let labelDepth: CGFloat = 13
+    static let progressDepth: CGFloat = 20
     static let progressBottomSlack: CGFloat = 2
 
     var expandedWidth: CGFloat {
         hardwareWidth + 2 * (Self.wingWidth + Self.topRadius)
     }
 
-    /// Fixed for one display configuration. Width includes room for horizontal
-    /// spring overshoot. Height includes the maximum subtle progress extension,
-    /// but staged/idle pixels remain transparent below the hardware notch band.
+    /// Fixed for one display configuration. The panel itself never animates size;
+    /// staged/moving states draw different amounts inside this transparent envelope.
     var windowSize: CGSize {
         CGSize(
             width: expandedWidth + 32,
@@ -101,6 +108,8 @@ private final class NotchWindow: NSPanel {
 
 @MainActor
 final class NotchOverlayController {
+    private static let minimumMovingPresentation: TimeInterval = 1.15
+
     private let model = NotchOverlayModel()
     private var panel: NotchWindow?
     private var dismissTask: DispatchWorkItem?
@@ -108,6 +117,8 @@ final class NotchOverlayController {
     private var closeTask: DispatchWorkItem?
     private var revealTask: DispatchWorkItem?
     private var progressTask: DispatchWorkItem?
+    private var successTask: DispatchWorkItem?
+    private var movingStartedAt: TimeInterval?
     private var lastLoggedGeometryKey: String?
 
     init() {
@@ -136,6 +147,7 @@ final class NotchOverlayController {
 
         model.state = .staged
         model.itemCount = items.count
+        model.itemLabel = label(for: items)
         model.fileIcon = fileIcon(for: items)
         model.visualProgress = 0
         revealFromHardwareNotchIfNeeded()
@@ -147,21 +159,52 @@ final class NotchOverlayController {
 
         model.state = .moving
         model.itemCount = items.count
+        model.itemLabel = label(for: items)
         model.fileIcon = fileIcon(for: items)
-        model.visualProgress = 0.08
+        model.visualProgress = 0.03
+        movingStartedAt = ProcessInfo.processInfo.systemUptime
         revealFromHardwareNotchIfNeeded()
         startVisualProgress()
     }
 
     func showSuccess(count: Int) {
-        cancelTimers()
+        // A same-volume move can complete in a few milliseconds. Keep the real
+        // operation fast, but give the interface enough time to visibly animate
+        // through Moving -> progress -> Done instead of flashing straight to 100%.
         guard preparePanel() else { return }
+
+        successTask?.cancel()
+        successTask = nil
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = movingStartedAt.map { max(0, now - $0) }
+            ?? Self.minimumMovingPresentation
+        let remaining = max(0, Self.minimumMovingPresentation - elapsed)
+
+        guard remaining > 0.001 else {
+            completeSuccess(count: count)
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.completeSuccess(count: count)
+        }
+        successTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+    }
+
+    private func completeSuccess(count: Int) {
+        successTask?.cancel()
+        successTask = nil
+        progressTask?.cancel()
+        progressTask = nil
+        movingStartedAt = nil
 
         model.state = .success
         model.itemCount = count
         model.visualProgress = 1
         revealFromHardwareNotchIfNeeded()
-        scheduleDismiss(after: 0.95)
+        scheduleDismiss(after: 1.05)
     }
 
     func showFailure(_ message: String, remainingItems: [URL]) {
@@ -170,6 +213,7 @@ final class NotchOverlayController {
 
         model.state = .failure
         model.itemCount = remainingItems.count
+        model.itemLabel = remainingItems.isEmpty ? "Move failed" : label(for: remainingItems)
         model.visualProgress = 0
         if !remainingItems.isEmpty {
             model.fileIcon = fileIcon(for: remainingItems)
@@ -220,7 +264,7 @@ final class NotchOverlayController {
         if key != lastLoggedGeometryKey {
             lastLoggedGeometryKey = key
             NSLog(
-                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f progressDepth=%.1f",
+                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f stagedDepth=%.1f progressDepth=%.1f",
                 screen.localizedName,
                 NSStringFromRect(screen.frame),
                 screen.safeAreaInsets.top,
@@ -232,6 +276,7 @@ final class NotchOverlayController {
                 geometry.expandedWidth,
                 geometry.hardwareHeight,
                 NotchGeometry.connectionOverlap,
+                NotchGeometry.labelDepth,
                 NotchGeometry.progressDepth
             )
         }
@@ -266,6 +311,9 @@ final class NotchOverlayController {
         revealTask = nil
         progressTask?.cancel()
         progressTask = nil
+        successTask?.cancel()
+        successTask = nil
+        movingStartedAt = nil
         model.presented = false
 
         let work = DispatchWorkItem { [weak self] in
@@ -276,10 +324,8 @@ final class NotchOverlayController {
     }
 
     /// FileManager does not currently expose byte-level progress through our move
-    /// service, so the notch uses a visual progress curve: advance smoothly toward
-    /// 90% while the operation is in flight, then complete to 100% on success.
-    /// This avoids a frozen indeterminate spinner while never claiming completion
-    /// before the move actually finishes.
+    /// service, so this is a visual curve: it visibly advances toward 90% while
+    /// the operation is in flight and only reaches 100% after the move callback.
     private func startVisualProgress() {
         progressTask?.cancel()
         progressTask = nil
@@ -294,7 +340,7 @@ final class NotchOverlayController {
 
             let ceiling: CGFloat = 0.90
             let remaining = ceiling - self.model.visualProgress
-            let step = max(0.006, remaining * 0.14)
+            let step = max(0.008, remaining * 0.11)
             self.model.visualProgress = min(ceiling, self.model.visualProgress + step)
 
             if self.model.visualProgress < ceiling - 0.002 {
@@ -303,7 +349,14 @@ final class NotchOverlayController {
         }
 
         progressTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: work)
+    }
+
+    private func label(for items: [URL]) -> String {
+        guard items.count == 1, let item = items.first else {
+            return "\(items.count) items"
+        }
+        return item.lastPathComponent
     }
 
     private func fileIcon(for items: [URL]) -> NSImage? {
@@ -326,6 +379,9 @@ final class NotchOverlayController {
         revealTask = nil
         progressTask?.cancel()
         progressTask = nil
+        successTask?.cancel()
+        successTask = nil
+        movingStartedAt = nil
         dismissTask?.cancel()
         returnToStagedTask?.cancel()
         closeTask?.cancel()
