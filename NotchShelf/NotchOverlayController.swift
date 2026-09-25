@@ -24,20 +24,26 @@ private struct NotchHardwareGeometry {
     let screen: NSScreen
     let width: CGFloat
     let height: CGFloat
+    let leftAuxiliaryArea: CGRect?
+    let rightAuxiliaryArea: CGRect?
 
     static func preferred() -> NotchHardwareGeometry? {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else {
             return nil
         }
 
-        let leftWidth = screen.auxiliaryTopLeftArea?.width ?? 0
-        let rightWidth = screen.auxiliaryTopRightArea?.width ?? 0
+        let leftArea = screen.auxiliaryTopLeftArea
+        let rightArea = screen.auxiliaryTopRightArea
+        let leftWidth = leftArea?.width ?? 0
+        let rightWidth = rightArea?.width ?? 0
         let measuredWidth = screen.frame.width - leftWidth - rightWidth
 
         return NotchHardwareGeometry(
             screen: screen,
             width: max(measuredWidth, 200),
-            height: screen.safeAreaInsets.top
+            height: screen.safeAreaInsets.top,
+            leftAuxiliaryArea: leftArea,
+            rightAuxiliaryArea: rightArea
         )
     }
 }
@@ -45,14 +51,15 @@ private struct NotchHardwareGeometry {
 @MainActor
 final class NotchOverlayController {
     // Fixed envelope. Like Glance, this window never resizes; SwiftUI animates
-    // only the black notch silhouette inside it.
-    private static let panelSize = CGSize(width: 380, height: 82)
+    // only the notch extension inside it. Must match NotchShelfView.Metrics.windowSize.
+    private static let panelSize = CGSize(width: 400, height: 96)
 
     private let model = NotchOverlayModel()
     private let panel: NSPanel
     private var dismissTask: DispatchWorkItem?
     private var returnToStagedTask: DispatchWorkItem?
     private var closeTask: DispatchWorkItem?
+    private var lastLoggedGeometryKey: String?
 
     init() {
         panel = NSPanel(
@@ -143,6 +150,7 @@ final class NotchOverlayController {
         model.hardwareWidth = geometry.width
         model.hardwareHeight = geometry.height
         positionPanel(on: geometry.screen)
+        logGeometryIfNeeded(geometry)
         return true
     }
 
@@ -152,8 +160,9 @@ final class NotchOverlayController {
             return
         }
 
-        // Render one frame at the exact hardware-notch footprint, then expand.
-        // This mirrors Glance's fixed-window approach and avoids a detached-card flash.
+        // First frame is fully transparent because NotchShelfView subtracts the
+        // closed physical-notch path from itself. Next run-loop turn expands only
+        // the pixels outside that real notch footprint.
         model.presented = false
         panel.orderFrontRegardless()
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -171,7 +180,7 @@ final class NotchOverlayController {
             self?.panel.orderOut(nil)
         }
         closeTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.48, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42, execute: work)
     }
 
     private func positionPanel(on screen: NSScreen) {
@@ -180,6 +189,33 @@ final class NotchOverlayController {
             x: screen.frame.midX - size.width / 2,
             y: screen.frame.maxY - size.height
         ))
+    }
+
+    private func logGeometryIfNeeded(_ geometry: NotchHardwareGeometry) {
+        let key = [
+            geometry.screen.localizedName,
+            String(format: "%.1fx%.1f", geometry.screen.frame.width, geometry.screen.frame.height),
+            String(format: "%.1f", geometry.screen.safeAreaInsets.top),
+            String(format: "%.1fx%.1f", geometry.width, geometry.height),
+            NSStringFromRect(geometry.leftAuxiliaryArea ?? .zero),
+            NSStringFromRect(geometry.rightAuxiliaryArea ?? .zero)
+        ].joined(separator: "|")
+
+        guard key != lastLoggedGeometryKey else { return }
+        lastLoggedGeometryKey = key
+
+        NSLog(
+            "[NotchShelf] Geometry — screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ measuredNotch=%.1fx%.1f scale=%.1f panel=%@",
+            geometry.screen.localizedName,
+            NSStringFromRect(geometry.screen.frame),
+            geometry.screen.safeAreaInsets.top,
+            NSStringFromRect(geometry.leftAuxiliaryArea ?? .zero),
+            NSStringFromRect(geometry.rightAuxiliaryArea ?? .zero),
+            geometry.width,
+            geometry.height,
+            geometry.screen.backingScaleFactor,
+            NSStringFromRect(panel.frame)
+        )
     }
 
     private func fileIcon(for items: [URL]) -> NSImage? {
