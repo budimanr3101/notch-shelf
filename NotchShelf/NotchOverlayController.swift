@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class NotchOverlayModel: ObservableObject {
-    enum State {
+    enum State: Equatable {
         case staged
         case moving
         case success
