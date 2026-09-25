@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
 
 @MainActor
 final class ShortcutMonitor {
@@ -11,16 +12,35 @@ final class ShortcutMonitor {
     var shouldCapturePaste: (() -> Bool)?
     var isFinderFrontmost: (() -> Bool)?
 
-    static func requestAccessibilityPrompt() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    static func requestPermissions() {
+        if !AXIsProcessTrusted() {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        }
+
+        if !CGPreflightListenEventAccess() {
+            _ = CGRequestListenEventAccess()
+        }
+    }
+
+    static func logPermissionStatus(prefix: String = "[NotchShelf]") {
+        let accessibility = AXIsProcessTrusted()
+        let inputMonitoring = CGPreflightListenEventAccess()
+        NSLog("\(prefix) Permission status — Accessibility: \(accessibility ? "granted" : "missing"), Input Monitoring: \(inputMonitoring ? "granted" : "missing")")
     }
 
     func start() {
         guard eventTap == nil else { return }
 
-        if !AXIsProcessTrusted() {
-            Self.requestAccessibilityPrompt()
+        Self.requestPermissions()
+
+        let accessibility = AXIsProcessTrusted()
+        let inputMonitoring = CGPreflightListenEventAccess()
+        Self.logPermissionStatus()
+
+        guard accessibility, inputMonitoring else {
+            NSLog("[NotchShelf] Keyboard monitor not started. Grant both Accessibility and Input Monitoring to this NotchShelf build, quit the app completely, then launch it again.")
+            return
         }
 
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
@@ -35,15 +55,13 @@ final class ShortcutMonitor {
                 guard let userInfo else { return Unmanaged.passUnretained(event) }
                 let monitor = Unmanaged<ShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
 
-                // This event tap is installed on the main run loop below, so bridge
-                // the C callback back into the Swift main-actor world explicitly.
                 return MainActor.assumeIsolated {
                     monitor.handle(type: type, event: event)
                 }
             },
             userInfo: pointer
         ) else {
-            NSLog("[NotchShelf] Could not create keyboard event tap. Grant Accessibility permission, then relaunch NotchShelf.")
+            NSLog("[NotchShelf] CGEventTap creation failed even though permissions preflight as granted. This usually means macOS TCC still trusts a different/older NotchShelf build. Reset the app's Accessibility and Input Monitoring entries, then grant the current build again.")
             return
         }
 
@@ -67,6 +85,13 @@ final class ShortcutMonitor {
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
         guard isFinderFrontmost?() == true else { return Unmanaged.passUnretained(event) }
 
