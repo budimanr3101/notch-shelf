@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
 
     private let coordinator = ShelfCoordinator()
+    private let pocketbook = PocketbookFeature()
 
     private var statusItem: NSStatusItem?
     private var shelfStatusItem: NSMenuItem?
@@ -14,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var defaultDropAppItem: NSMenuItem?
     private var openRecentItem: NSMenuItem?
     private var clearProjectItem: NSMenuItem?
+    private var pocketbookShortcutItem: NSMenuItem?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -31,13 +33,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.onDropOpenerChanged = { [weak self] in
             self?.updateDropOpenerUI()
         }
+        pocketbook.onShortcutChanged = { [weak self] in
+            self?.updatePocketbookUI()
+        }
 
         coordinator.start()
+        pocketbook.start()
         updateProjectStatus(url: coordinator.recentProjectURL)
         updateDropOpenerUI()
+        updatePocketbookUI()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        pocketbook.stop()
         coordinator.stop()
     }
 
@@ -104,6 +112,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let pocketHeader = NSMenuItem(title: "Pocketbook", action: nil, keyEquivalent: "")
+        pocketHeader.isEnabled = false
+        menu.addItem(pocketHeader)
+
+        let openPocketbook = NSMenuItem(
+            title: "Open Pocketbook",
+            action: #selector(openPocketbookAction),
+            keyEquivalent: ""
+        )
+        openPocketbook.target = self
+        menu.addItem(openPocketbook)
+
+        let shortcutItem = NSMenuItem(
+            title: "Shortcut: \(pocketbook.shortcutDescription)…",
+            action: #selector(configurePocketbookShortcut),
+            keyEquivalent: ""
+        )
+        shortcutItem.target = self
+        menu.addItem(shortcutItem)
+        pocketbookShortcutItem = shortcutItem
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(
             title: "Quit NotchShelf",
             action: #selector(NSApplication.terminate(_:)),
@@ -117,12 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateShelfStatus(count: 0)
         updateProjectStatus(url: nil)
         updateDropOpenerUI()
+        updatePocketbookUI()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         updateShelfStatus(count: coordinator.stagedCount)
         updateProjectStatus(url: coordinator.recentProjectURL)
         updateDropOpenerUI()
+        updatePocketbookUI()
     }
 
     private func updateShelfStatus(count: Int) {
@@ -147,9 +180,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateDropOpenerUI() {
         defaultDropAppItem?.title = "Default Drop App: \(coordinator.defaultDropOpenerName)"
 
-        // Only surface applications that really exist on this Mac. The catalog is
-        // deliberately larger than the menu so we can support an app automatically
-        // when the user installs it later without showing dead options today.
         let availableOptions = coordinator.dropOpenerMenuOptions.filter { $0.isAvailable }
 
         if let submenu = defaultDropAppItem?.submenu {
@@ -204,6 +234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func updatePocketbookUI() {
+        pocketbookShortcutItem?.title = "Shortcut: \(pocketbook.shortcutDescription)…"
+    }
+
     @objc private func clearShelf() {
         coordinator.clearShelf()
     }
@@ -243,9 +277,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(appURL.path, forKey: Self.customOpenerPathDefaultsKey)
         defaults.set("custom", forKey: Self.defaultOpenerDefaultsKey)
 
-        // openRecentWithDefaultApp resolves the opener synchronously before the
-        // actual NSWorkspace open callback, so restoring the preference immediately
-        // keeps this choice truly one-shot while preserving all notch animations.
         coordinator.openRecentWithDefaultApp()
 
         restoreDefaults(
@@ -289,5 +320,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func clearRecentProject() {
         coordinator.clearRecentProject()
+    }
+
+    @objc private func openPocketbookAction() {
+        pocketbook.toggle()
+    }
+
+    @objc private func configurePocketbookShortcut() {
+        pocketbook.showShortcutRecorder()
+        updatePocketbookUI()
     }
 }
