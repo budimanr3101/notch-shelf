@@ -13,72 +13,112 @@ final class NotchOverlayModel: ObservableObject {
     @Published var state: State = .staged
     @Published var itemCount = 0
     @Published var presented = false
-    @Published var hardwareWidth: CGFloat = 200
-    @Published var hardwareHeight: CGFloat = 32
+    @Published var geometry: NotchGeometry?
     @Published var fileIcon: NSImage?
 }
 
-/// Physical-notch measurement adapted from Glance's notch geometry.
-/// NotchShelf deliberately has no pill fallback: no physical notch, no overlay.
-private struct NotchHardwareGeometry {
-    let screen: NSScreen
-    let width: CGFloat
-    let height: CGFloat
-    let leftAuxiliaryArea: CGRect?
-    let rightAuxiliaryArea: CGRect?
+struct NotchGeometry: Equatable {
+    let hardwareWidth: CGFloat
+    let hardwareHeight: CGFloat
 
-    static func preferred() -> NotchHardwareGeometry? {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else {
+    static let wingWidth: CGFloat = 42
+    static let topRadius: CGFloat = 8
+    static let bottomRadius: CGFloat = 12
+    static let connectionOverlap: CGFloat = 6
+
+    var expandedWidth: CGFloat {
+        hardwareWidth + 2 * (Self.wingWidth + Self.topRadius)
+    }
+
+    /// Fixed for one display configuration. Width includes room for horizontal
+    /// spring overshoot; height intentionally equals the real notch band.
+    var windowSize: CGSize {
+        CGSize(width: expandedWidth + 32, height: hardwareHeight)
+    }
+
+    static func measure(_ screen: NSScreen) -> NotchGeometry? {
+        guard screen.safeAreaInsets.top > 0,
+              let left = screen.auxiliaryTopLeftArea,
+              let right = screen.auxiliaryTopRightArea,
+              left.width > 0,
+              right.width > 0 else {
             return nil
         }
 
-        let leftArea = screen.auxiliaryTopLeftArea
-        let rightArea = screen.auxiliaryTopRightArea
-        let leftWidth = leftArea?.width ?? 0
-        let rightWidth = rightArea?.width ?? 0
-        let measuredWidth = screen.frame.width - leftWidth - rightWidth
+        let width = screen.frame.width - left.width - right.width
+        guard width > 0, width < screen.frame.width / 2 else {
+            return nil
+        }
 
-        return NotchHardwareGeometry(
-            screen: screen,
-            width: max(measuredWidth, 200),
-            height: screen.safeAreaInsets.top,
-            leftAuxiliaryArea: leftArea,
-            rightAuxiliaryArea: rightArea
+        return NotchGeometry(
+            hardwareWidth: width,
+            hardwareHeight: screen.safeAreaInsets.top
         )
     }
 }
 
-@MainActor
-final class NotchOverlayController {
-    // Horizontal-only envelope. The rendered silhouette is always exactly the
-    // physical notch height; this extra transparent height is only safety margin.
-    private static let panelSize = CGSize(width: 400, height: 64)
+/// Fixed transparent panel anchored to the physical notch band.
+/// The panel never resizes during an animation; SwiftUI only changes the wing paths.
+private final class NotchWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
-    private let model = NotchOverlayModel()
-    private let panel: NSPanel
-    private var dismissTask: DispatchWorkItem?
-    private var returnToStagedTask: DispatchWorkItem?
-    private var closeTask: DispatchWorkItem?
-    private var lastLoggedGeometryKey: String?
-
-    init() {
-        panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: Self.panelSize),
+    init(geometry: NotchGeometry, model: NotchOverlayModel) {
+        super.init(
+            contentRect: NSRect(origin: .zero, size: geometry.windowSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
 
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.isMovable = false
-        panel.isReleasedWhenClosed = false
-        panel.level = .mainMenu + 3
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-        panel.ignoresMouseEvents = true
-        panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: NotchShelfView(model: model))
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        isMovable = false
+        isReleasedWhenClosed = false
+        level = .mainMenu + 3
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        ignoresMouseEvents = true
+        hidesOnDeactivate = false
+
+        let hosting = NSHostingView(rootView: NotchShelfView(model: model))
+        // We intentionally draw inside the display's unsafe camera-cutout band.
+        // Leaving the default safe area enabled can shift the whole SwiftUI root
+        // below the physical notch and create the detached-pill look.
+        hosting.safeAreaRegions = []
+        hosting.sizingOptions = []
+        contentView = hosting
+    }
+}
+
+@MainActor
+final class NotchOverlayController {
+    private let model = NotchOverlayModel()
+    private var panel: NotchWindow?
+    private var dismissTask: DispatchWorkItem?
+    private var returnToStagedTask: DispatchWorkItem?
+    private var closeTask: DispatchWorkItem?
+    private var revealTask: DispatchWorkItem?
+    private var lastLoggedGeometryKey: String?
+
+    init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func screenChanged() {
+        guard model.presented else { return }
+        if preparePanel() {
+            panel?.orderFrontRegardless()
+        }
     }
 
     func showStaged(items: [URL]) {
@@ -107,7 +147,6 @@ final class NotchOverlayController {
 
         model.state = .success
         model.itemCount = count
-        // Keep the staged file icon on the left. Only the right-side status changes.
         revealFromHardwareNotchIfNeeded()
         scheduleDismiss(after: 0.72)
     }
@@ -137,86 +176,86 @@ final class NotchOverlayController {
 
     func hide() {
         cancelTimers()
-        guard panel.isVisible else { return }
+        guard panel?.isVisible == true else { return }
         animateClosedAndOrderOut()
     }
 
     @discardableResult
     private func preparePanel() -> Bool {
-        guard let geometry = NotchHardwareGeometry.preferred() else {
-            panel.orderOut(nil)
-            NSLog("[NotchShelf] No physical notch detected. Overlay not shown; pill fallback is disabled.")
+        guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
+              let geometry = NotchGeometry.measure(screen) else {
+            panel?.orderOut(nil)
+            NSLog("[NotchShelf] No measurable physical notch. Overlay suppressed.")
             return false
         }
 
-        model.hardwareWidth = geometry.width
-        model.hardwareHeight = geometry.height
-        positionPanel(on: geometry.screen)
-        logGeometryIfNeeded(geometry)
+        if model.geometry != geometry || panel == nil {
+            panel?.orderOut(nil)
+            model.geometry = geometry
+            panel = NotchWindow(geometry: geometry, model: model)
+        }
+
+        guard let panel else { return false }
+
+        panel.setFrameOrigin(NSPoint(
+            x: screen.frame.midX - panel.frame.width / 2,
+            y: screen.frame.maxY - panel.frame.height
+        ))
+
+        let key = "\(screen.frame)|\(geometry)|\(screen.backingScaleFactor)"
+        if key != lastLoggedGeometryKey {
+            lastLoggedGeometryKey = key
+            NSLog(
+                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f",
+                screen.localizedName,
+                NSStringFromRect(screen.frame),
+                screen.safeAreaInsets.top,
+                NSStringFromRect(screen.auxiliaryTopLeftArea ?? .zero),
+                NSStringFromRect(screen.auxiliaryTopRightArea ?? .zero),
+                geometry.hardwareWidth,
+                geometry.hardwareHeight,
+                NSStringFromRect(panel.frame),
+                geometry.expandedWidth,
+                geometry.hardwareHeight,
+                NotchGeometry.connectionOverlap
+            )
+        }
+
         return true
     }
 
     private func revealFromHardwareNotchIfNeeded() {
+        guard let panel else { return }
+
         if panel.isVisible {
             model.presented = true
             return
         }
 
-        // First frame has zero software extension. On the next run-loop turn the
-        // view widens left/right while keeping exactly the same hardware height.
+        // Frame zero is completely transparent. The next run-loop turn grows only
+        // the horizontal wings from the physical notch edges.
         model.presented = false
         panel.orderFrontRegardless()
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.displayIfNeeded()
 
-        DispatchQueue.main.async { [weak self] in
+        let work = DispatchWorkItem { [weak self] in
             self?.model.presented = true
         }
+        revealTask = work
+        DispatchQueue.main.async(execute: work)
     }
 
     private func animateClosedAndOrderOut() {
+        revealTask?.cancel()
+        revealTask = nil
         model.presented = false
 
         let work = DispatchWorkItem { [weak self] in
-            self?.panel.orderOut(nil)
+            self?.panel?.orderOut(nil)
         }
         closeTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34, execute: work)
-    }
-
-    private func positionPanel(on screen: NSScreen) {
-        let size = Self.panelSize
-        panel.setFrameOrigin(NSPoint(
-            x: screen.frame.midX - size.width / 2,
-            y: screen.frame.maxY - size.height
-        ))
-    }
-
-    private func logGeometryIfNeeded(_ geometry: NotchHardwareGeometry) {
-        let key = [
-            geometry.screen.localizedName,
-            String(format: "%.1fx%.1f", geometry.screen.frame.width, geometry.screen.frame.height),
-            String(format: "%.1f", geometry.screen.safeAreaInsets.top),
-            String(format: "%.1fx%.1f", geometry.width, geometry.height),
-            NSStringFromRect(geometry.leftAuxiliaryArea ?? .zero),
-            NSStringFromRect(geometry.rightAuxiliaryArea ?? .zero)
-        ].joined(separator: "|")
-
-        guard key != lastLoggedGeometryKey else { return }
-        lastLoggedGeometryKey = key
-
-        NSLog(
-            "[NotchShelf] Geometry — screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ measuredNotch=%.1fx%.1f scale=%.1f panel=%@",
-            geometry.screen.localizedName,
-            NSStringFromRect(geometry.screen.frame),
-            geometry.screen.safeAreaInsets.top,
-            NSStringFromRect(geometry.leftAuxiliaryArea ?? .zero),
-            NSStringFromRect(geometry.rightAuxiliaryArea ?? .zero),
-            geometry.width,
-            geometry.height,
-            geometry.screen.backingScaleFactor,
-            NSStringFromRect(panel.frame)
-        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
     }
 
     private func fileIcon(for items: [URL]) -> NSImage? {
@@ -235,6 +274,8 @@ final class NotchOverlayController {
     }
 
     private func cancelTimers() {
+        revealTask?.cancel()
+        revealTask = nil
         dismissTask?.cancel()
         returnToStagedTask?.cancel()
         closeTask?.cancel()
