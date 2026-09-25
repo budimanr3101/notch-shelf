@@ -7,7 +7,11 @@ struct FileMoveBatchResult {
 }
 
 final class FileMoveService {
-    func move(_ items: [URL], to destinationFolder: URL, completion: @escaping (FileMoveBatchResult) -> Void) {
+    func move(
+        _ items: [URL],
+        to destinationFolder: URL,
+        completion: @MainActor @escaping (FileMoveBatchResult) -> Void
+    ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let manager = FileManager.default
 
