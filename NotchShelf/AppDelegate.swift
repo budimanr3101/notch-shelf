@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clear.target = self
         menu.addItem(clear)
 
-        let permissions = NSMenuItem(title: "Request Accessibility Access", action: #selector(requestAccessibility), keyEquivalent: "")
+        let permissions = NSMenuItem(title: "Request Keyboard Permissions", action: #selector(requestKeyboardPermissions), keyEquivalent: "")
         permissions.target = self
         menu.addItem(permissions)
 
@@ -68,7 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.clearShelf()
     }
 
-    @objc private func requestAccessibility() {
-        ShortcutMonitor.requestAccessibilityPrompt()
+    @objc private func requestKeyboardPermissions() {
+        ShortcutMonitor.requestPermissions()
+        ShortcutMonitor.logPermissionStatus()
     }
 }
