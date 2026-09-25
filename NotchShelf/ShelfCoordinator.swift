@@ -1,9 +1,126 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
+
+struct DropOpenerMenuOption {
+    let id: String
+    let displayName: String
+    let isAvailable: Bool
+    let isSelected: Bool
+}
+
+private struct DropOpenerDefinition {
+    enum Behavior {
+        case finder
+        case application(terminalLike: Bool)
+    }
+
+    let id: String
+    let displayName: String
+    let bundleIdentifier: String?
+    let behavior: Behavior
+}
+
+private struct ResolvedDropOpener {
+    let id: String
+    let displayName: String
+    let appURL: URL?
+    let appIcon: NSImage?
+    let behavior: DropOpenerDefinition.Behavior
+}
 
 @MainActor
 final class ShelfCoordinator {
     private static let recentProjectDefaultsKey = "NotchShelf.recentProjectPath"
+    private static let defaultOpenerDefaultsKey = "NotchShelf.defaultDropOpener"
+    private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
+
+    private static let openerCatalog: [DropOpenerDefinition] = [
+        .init(
+            id: "finder",
+            displayName: "Finder",
+            bundleIdentifier: "com.apple.finder",
+            behavior: .finder
+        ),
+        .init(
+            id: "terminal",
+            displayName: "Terminal",
+            bundleIdentifier: "com.apple.Terminal",
+            behavior: .application(terminalLike: true)
+        ),
+        .init(
+            id: "iterm2",
+            displayName: "iTerm2",
+            bundleIdentifier: "com.googlecode.iterm2",
+            behavior: .application(terminalLike: true)
+        ),
+        .init(
+            id: "vscode",
+            displayName: "Visual Studio Code",
+            bundleIdentifier: "com.microsoft.VSCode",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "cursor",
+            displayName: "Cursor",
+            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "xcode",
+            displayName: "Xcode",
+            bundleIdentifier: "com.apple.dt.Xcode",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "intellij",
+            displayName: "IntelliJ IDEA",
+            bundleIdentifier: "com.jetbrains.intellij",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "webstorm",
+            displayName: "WebStorm",
+            bundleIdentifier: "com.jetbrains.WebStorm",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "pycharm",
+            displayName: "PyCharm",
+            bundleIdentifier: "com.jetbrains.PyCharm",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "goland",
+            displayName: "GoLand",
+            bundleIdentifier: "com.jetbrains.goland",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "rider",
+            displayName: "Rider",
+            bundleIdentifier: "com.jetbrains.rider",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "datagrip",
+            displayName: "DataGrip",
+            bundleIdentifier: "com.jetbrains.datagrip",
+            behavior: .application(terminalLike: false)
+        ),
+        .init(
+            id: "warp",
+            displayName: "Warp",
+            bundleIdentifier: "dev.warp.Warp-Stable",
+            behavior: .application(terminalLike: true)
+        ),
+        .init(
+            id: "zed",
+            displayName: "Zed",
+            bundleIdentifier: "dev.zed.Zed",
+            behavior: .application(terminalLike: false)
+        ),
+    ]
 
     private let store = ShelfStore()
     private let finder = FinderBridge()
@@ -17,13 +134,40 @@ final class ShelfCoordinator {
 
     var onShelfChanged: ((Int) -> Void)?
     var onProjectChanged: ((URL?) -> Void)?
+    var onDropOpenerChanged: (() -> Void)?
 
     var stagedCount: Int { store.count }
     var recentProjectURL: URL? { validatedRecentProject() }
+    var defaultDropOpenerName: String { resolveDefaultOpener().displayName }
+
+    var dropOpenerMenuOptions: [DropOpenerMenuOption] {
+        let selectedID = resolveDefaultOpener().id
+        var options = Self.openerCatalog.map { definition in
+            DropOpenerMenuOption(
+                id: definition.id,
+                displayName: definition.displayName,
+                isAvailable: definition.behavior.isFinder || applicationURL(for: definition) != nil,
+                isSelected: selectedID == definition.id
+            )
+        }
+
+        if let custom = resolveCustomOpener() {
+            options.append(
+                DropOpenerMenuOption(
+                    id: "custom",
+                    displayName: "Custom: \(custom.displayName)",
+                    isAvailable: true,
+                    isSelected: selectedID == "custom"
+                )
+            )
+        }
+
+        return options
+    }
 
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.recentProjectDefaultsKey) {
-            recentProject = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+            recentProject = URL(fileURLWithPath: path).standardizedFileURL
         }
 
         shortcuts.isFinderFrontmost = { [weak self] in
@@ -45,8 +189,8 @@ final class ShelfCoordinator {
         projectDropTarget.onDragExited = { [weak self] in
             self?.restoreShelfOverlay()
         }
-        projectDropTarget.onProjectDropped = { [weak self] url in
-            self?.saveProject(url)
+        projectDropTarget.onItemDropped = { [weak self] url in
+            self?.handleDroppedItem(url)
         }
     }
 
@@ -54,6 +198,7 @@ final class ShelfCoordinator {
         shortcuts.start()
         projectDropTarget.start()
         onProjectChanged?(validatedRecentProject())
+        onDropOpenerChanged?()
     }
 
     func stop() {
@@ -71,40 +216,67 @@ final class ShelfCoordinator {
         onShelfChanged?(0)
     }
 
-    func openRecentProjectInFinder() {
+    func setDefaultDropOpener(id: String) {
+        guard id != "custom" else {
+            if resolveCustomOpener() != nil {
+                UserDefaults.standard.set("custom", forKey: Self.defaultOpenerDefaultsKey)
+                onDropOpenerChanged?()
+                showOpenerChangedFeedback()
+            }
+            return
+        }
+
+        guard let definition = Self.openerCatalog.first(where: { $0.id == id }),
+              definition.behavior.isFinder || applicationURL(for: definition) != nil else {
+            NSSound.beep()
+            return
+        }
+
+        UserDefaults.standard.set(id, forKey: Self.defaultOpenerDefaultsKey)
+        onDropOpenerChanged?()
+        showOpenerChangedFeedback()
+    }
+
+    func chooseCustomDropApp() {
+        let picker = NSOpenPanel()
+        picker.title = "Choose Default Drop App"
+        picker.message = "Folders and files dropped into NotchShelf will open with this application."
+        picker.prompt = "Choose App"
+        picker.canChooseFiles = true
+        picker.canChooseDirectories = false
+        picker.allowsMultipleSelection = false
+        picker.allowedContentTypes = [.application]
+        picker.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+
+        UserDefaults.standard.set(url.path, forKey: Self.customOpenerPathDefaultsKey)
+        UserDefaults.standard.set("custom", forKey: Self.defaultOpenerDefaultsKey)
+        onDropOpenerChanged?()
+        showOpenerChangedFeedback()
+    }
+
+    func openRecentWithDefaultApp() {
         guard let url = validatedRecentProject() else {
             NSSound.beep()
             return
         }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
 
-    func openRecentProjectInTerminal() {
-        guard let url = validatedRecentProject(),
-              let terminalURL = NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: "com.apple.Terminal"
-              ) else {
-            NSSound.beep()
-            return
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.open(
-            [url],
-            withApplicationAt: terminalURL,
-            configuration: configuration
-        ) { _, error in
-            if let error {
-                NSLog("[NotchShelf] Could not open project in Terminal: %@", error.localizedDescription)
-            }
-        }
+        openItemWithAnimatedFeedback(url)
     }
 
     func clearRecentProject() {
         recentProject = nil
         UserDefaults.standard.removeObject(forKey: Self.recentProjectDefaultsKey)
         onProjectChanged?(nil)
+
+        overlay.showNotice(
+            title: "Recent project cleared",
+            subtitle: "Drop Zone is ready",
+            icon: NSImage(systemSymbolName: "folder.badge.minus", accessibilityDescription: nil)
+        )
+        scheduleRestore(after: 1.0)
         NSLog("[NotchShelf] Cleared recent project")
     }
 
@@ -167,28 +339,113 @@ final class ShelfCoordinator {
 
     private func previewProjectDrop(_ url: URL) {
         cancelProjectPreviewRestore()
-        overlay.showStaged(items: [url])
-        NSLog("[NotchShelf] Project drop target: %@", url.lastPathComponent)
+        let opener = resolveDefaultOpener()
+        overlay.showDropHover(
+            item: url,
+            targetAppName: opener.displayName,
+            targetAppIcon: opener.appIcon
+        )
+        NSLog(
+            "[NotchShelf] Drop target: %@ -> %@",
+            url.lastPathComponent,
+            opener.displayName
+        )
     }
 
-    private func saveProject(_ url: URL) {
+    private func handleDroppedItem(_ url: URL) {
         cancelProjectPreviewRestore()
 
-        let project = url.standardizedFileURL
+        let item = url.standardizedFileURL
+        let project = projectDirectory(for: item)
         recentProject = project
         UserDefaults.standard.set(project.path, forKey: Self.recentProjectDefaultsKey)
         onProjectChanged?(project)
 
-        // Reuse the polished staged presentation for the first version of Project
-        // Drop Zone: folder icon on the left and the project name in the footer.
-        overlay.showStaged(items: [project])
-        NSLog("[NotchShelf] Saved recent project: %@", project.path)
+        openItemWithAnimatedFeedback(item)
+        NSLog("[NotchShelf] Dropped item: %@", item.path)
+    }
 
-        let work = DispatchWorkItem { [weak self] in
-            self?.restoreShelfOverlay()
+    private func openItemWithAnimatedFeedback(_ item: URL) {
+        cancelProjectPreviewRestore()
+        let opener = resolveDefaultOpener()
+
+        overlay.showDropOpening(
+            item: item,
+            targetAppName: opener.displayName,
+            targetAppIcon: opener.appIcon
+        )
+
+        open(item, with: opener) { [weak self] success, message in
+            guard let self else { return }
+
+            if success {
+                self.overlay.showDropSuccess(
+                    item: item,
+                    targetAppName: opener.displayName,
+                    targetAppIcon: opener.appIcon
+                )
+                self.scheduleRestore(after: 1.2)
+                NSLog("[NotchShelf] Opened %@ in %@", item.lastPathComponent, opener.displayName)
+            } else {
+                self.overlay.showDropFailure(
+                    item: item,
+                    targetAppName: opener.displayName,
+                    targetAppIcon: opener.appIcon,
+                    message: message ?? "Could not open item"
+                )
+                self.scheduleRestore(after: 1.6)
+                NSSound.beep()
+                NSLog("[NotchShelf] Open failed: %@", message ?? "unknown error")
+            }
         }
-        projectPreviewTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15, execute: work)
+    }
+
+    private func open(
+        _ item: URL,
+        with opener: ResolvedDropOpener,
+        completion: @escaping @MainActor (Bool, String?) -> Void
+    ) {
+        switch opener.behavior {
+        case .finder:
+            NSWorkspace.shared.activateFileViewerSelecting([item])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                completion(true, nil)
+            }
+
+        case .application(let terminalLike):
+            guard let appURL = opener.appURL else {
+                completion(false, "\(opener.displayName) is not installed")
+                return
+            }
+
+            let target = terminalLike && !isDirectory(item)
+                ? item.deletingLastPathComponent()
+                : item
+
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+
+            NSWorkspace.shared.open(
+                [target],
+                withApplicationAt: appURL,
+                configuration: configuration
+            ) { _, error in
+                Task { @MainActor in
+                    completion(error == nil, error?.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func showOpenerChangedFeedback() {
+        cancelProjectPreviewRestore()
+        let opener = resolveDefaultOpener()
+        overlay.showNotice(
+            title: opener.displayName,
+            subtitle: "Default Drop App",
+            icon: opener.appIcon
+        )
+        scheduleRestore(after: 1.05)
     }
 
     private func restoreShelfOverlay() {
@@ -201,36 +458,127 @@ final class ShelfCoordinator {
         }
     }
 
+    private func scheduleRestore(after delay: TimeInterval) {
+        cancelProjectPreviewRestore()
+        let work = DispatchWorkItem { [weak self] in
+            self?.restoreShelfOverlay()
+        }
+        projectPreviewTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     private func cancelProjectPreviewRestore() {
         projectPreviewTask?.cancel()
         projectPreviewTask = nil
     }
 
     private func validatedRecentProject() -> URL? {
-        guard let recentProject else { return nil }
+        guard let recentProject,
+              FileManager.default.fileExists(atPath: recentProject.path) else {
+            return nil
+        }
+        return recentProject
+    }
 
+    private func projectDirectory(for item: URL) -> URL {
+        isDirectory(item) ? item : item.deletingLastPathComponent()
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(
-            atPath: recentProject.path,
+        return FileManager.default.fileExists(
+            atPath: url.path,
             isDirectory: &isDirectory
-        ), isDirectory.boolValue else {
+        ) && isDirectory.boolValue
+    }
+
+    private func resolveDefaultOpener() -> ResolvedDropOpener {
+        let requestedID = UserDefaults.standard.string(forKey: Self.defaultOpenerDefaultsKey)
+            ?? "finder"
+
+        if requestedID == "custom", let custom = resolveCustomOpener() {
+            return custom
+        }
+
+        if let definition = Self.openerCatalog.first(where: { $0.id == requestedID }),
+           let resolved = resolve(definition) {
+            return resolved
+        }
+
+        let finder = Self.openerCatalog.first(where: { $0.id == "finder" })!
+        return resolve(finder)!
+    }
+
+    private func resolve(_ definition: DropOpenerDefinition) -> ResolvedDropOpener? {
+        if definition.behavior.isFinder {
+            let appURL = definition.bundleIdentifier.flatMap {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+            }
+            return ResolvedDropOpener(
+                id: definition.id,
+                displayName: definition.displayName,
+                appURL: appURL,
+                appIcon: appURL.map { NSWorkspace.shared.icon(forFile: $0.path) },
+                behavior: definition.behavior
+            )
+        }
+
+        guard let appURL = applicationURL(for: definition) else { return nil }
+        return ResolvedDropOpener(
+            id: definition.id,
+            displayName: definition.displayName,
+            appURL: appURL,
+            appIcon: NSWorkspace.shared.icon(forFile: appURL.path),
+            behavior: definition.behavior
+        )
+    }
+
+    private func resolveCustomOpener() -> ResolvedDropOpener? {
+        guard let path = UserDefaults.standard.string(forKey: Self.customOpenerPathDefaultsKey) else {
             return nil
         }
 
-        return recentProject
+        let appURL = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: appURL.path) else { return nil }
+
+        let bundle = Bundle(url: appURL)
+        let displayName = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+
+        return ResolvedDropOpener(
+            id: "custom",
+            displayName: displayName,
+            appURL: appURL,
+            appIcon: NSWorkspace.shared.icon(forFile: appURL.path),
+            behavior: .application(terminalLike: false)
+        )
+    }
+
+    private func applicationURL(for definition: DropOpenerDefinition) -> URL? {
+        guard let bundleIdentifier = definition.bundleIdentifier else { return nil }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+    }
+}
+
+private extension DropOpenerDefinition.Behavior {
+    var isFinder: Bool {
+        if case .finder = self { return true }
+        return false
     }
 }
 
 // MARK: - Project Drop Zone
 
-/// A tiny transparent drag destination that lives exactly over the physical
-/// camera cutout. It does not cover the left/right menu bar wings, so regular
-/// menu-bar interaction remains untouched.
+/// Transparent drag destination centered over the physical camera cutout.
+/// The visible Drop Zone is rendered by NotchOverlayController and grows much
+/// larger after drag-enter; this always-on panel stays over hardware-only pixels
+/// so normal menu-bar clicks are never stolen.
 @MainActor
 final class ProjectDropTarget {
     var onDragEntered: ((URL) -> Void)?
     var onDragExited: (() -> Void)?
-    var onProjectDropped: ((URL) -> Void)?
+    var onItemDropped: ((URL) -> Void)?
 
     private var panel: ProjectDropPanel?
     private var screenObserver: NSObjectProtocol?
@@ -273,10 +621,8 @@ final class ProjectDropTarget {
             return
         }
 
-        // A few extra points make the target forgiving without covering useful
-        // menu-bar controls on either side of the camera housing.
         let targetSize = CGSize(
-            width: geometry.hardwareWidth + 12,
+            width: geometry.hardwareWidth + 16,
             height: geometry.hardwareHeight
         )
         let frame = NSRect(
@@ -289,29 +635,20 @@ final class ProjectDropTarget {
         let dropView = ProjectDropView(frame: NSRect(origin: .zero, size: targetSize))
         dropView.autoresizingMask = [.width, .height]
         dropView.onHover = { [weak self] url in
-            Task { @MainActor in
-                self?.onDragEntered?(url)
-            }
+            Task { @MainActor in self?.onDragEntered?(url) }
         }
         dropView.onExit = { [weak self] in
-            Task { @MainActor in
-                self?.onDragExited?()
-            }
+            Task { @MainActor in self?.onDragExited?() }
         }
         dropView.onDrop = { [weak self] url in
-            Task { @MainActor in
-                self?.onProjectDropped?(url)
-            }
+            Task { @MainActor in self?.onItemDropped?(url) }
         }
 
         let panel = ProjectDropPanel(frame: frame, dropView: dropView)
         self.panel = panel
         panel.orderFrontRegardless()
 
-        NSLog(
-            "[NotchShelf] Project drop zone ready: %@",
-            NSStringFromRect(frame)
-        )
+        NSLog("[NotchShelf] Project drop zone ready: %@", NSStringFromRect(frame))
     }
 }
 
@@ -362,7 +699,7 @@ private final class ProjectDropView: NSView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         completedDrop = false
-        guard let url = projectURL(from: sender) else {
+        guard let url = droppedURL(from: sender) else {
             currentURL = nil
             return []
         }
@@ -373,7 +710,7 @@ private final class ProjectDropView: NSView {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let url = projectURL(from: sender) else {
+        guard let url = droppedURL(from: sender) else {
             if currentURL != nil {
                 currentURL = nil
                 onExit?()
@@ -398,7 +735,7 @@ private final class ProjectDropView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let url = projectURL(from: sender) else { return false }
+        guard let url = droppedURL(from: sender) else { return false }
 
         completedDrop = true
         currentURL = nil
@@ -406,7 +743,7 @@ private final class ProjectDropView: NSView {
         return true
     }
 
-    private func projectURL(from sender: NSDraggingInfo) -> URL? {
+    private func droppedURL(from sender: NSDraggingInfo) -> URL? {
         let options: [NSPasteboard.ReadingOptionKey: Any] = [
             .urlReadingFileURLsOnly: true
         ]
@@ -420,14 +757,7 @@ private final class ProjectDropView: NSView {
         }
 
         let url = (nsURL as URL).standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(
-            atPath: url.path,
-            isDirectory: &isDirectory
-        ), isDirectory.boolValue else {
-            return nil
-        }
-
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
 }
