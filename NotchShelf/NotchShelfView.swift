@@ -5,67 +5,40 @@ struct NotchShelfView: View {
     @ObservedObject var model: NotchOverlayModel
 
     private enum Metrics {
-        // Closed geometry follows Glance's physical-notch silhouette.
-        static let closedTopRadius: CGFloat = 8
-        static let closedBottomRadius: CGFloat = 12
-
-        // Do NOT use Glance's minimal bottom radius (22 on ~44pt height) here.
-        // That ratio reads as a capsule. Keep the same notch silhouette language,
-        // but use a shallower shelf expansion so it remains visibly notch-shaped.
-        static let openTopRadius: CGFloat = 12
-        static let openBottomRadius: CGFloat = 15
-        static let flankWidth: CGFloat = 46
-        static let heightBump: CGFloat = 18
-
+        // Horizontal-only mode: the software extension is never taller than the
+        // physical notch. These radii intentionally stay identical while opening.
+        static let topRadius: CGFloat = 8
+        static let bottomRadius: CGFloat = 12
+        static let flankWidth: CGFloat = 54
+        static let contentWidth: CGFloat = 40
         static let contentEdgeInset: CGFloat = 4
-        static let contentWidth: CGFloat = 38
-        static let windowSize = CGSize(width: 400, height: 96)
+        static let windowSize = CGSize(width: 400, height: 64)
 
-        static let openResponse: Double = 0.42
-        static let openDamping: Double = 0.78
-        static let closeResponse: Double = 0.38
+        static let openResponse: Double = 0.34
+        static let openDamping: Double = 0.82
+        static let closeResponse: Double = 0.28
         static let closeDamping: Double = 1.0
     }
 
-    private var expandedBodySize: CGSize {
-        CGSize(
-            width: model.hardwareWidth + Metrics.flankWidth * 2,
-            height: model.hardwareHeight + Metrics.heightBump
-        )
+    private var bodyWidth: CGFloat {
+        model.hardwareWidth + (model.presented ? Metrics.flankWidth * 2 : 0)
     }
 
-    private var closedBodySize: CGSize {
-        CGSize(width: model.hardwareWidth, height: model.hardwareHeight)
+    // Critical invariant: NotchShelf never grows downward.
+    private var bodyHeight: CGFloat {
+        model.hardwareHeight
     }
 
-    private var bodySize: CGSize {
-        model.presented ? expandedBodySize : closedBodySize
-    }
-
-    private var topRadius: CGFloat {
-        model.presented ? Metrics.openTopRadius : Metrics.closedTopRadius
-    }
-
-    private var bottomRadius: CGFloat {
-        model.presented ? Metrics.openBottomRadius : Metrics.closedBottomRadius
-    }
-
-    /// Same convention as Glance: the visible black body is inset by the top
-    /// flare radius, so the fixed silhouette width includes 2x flare allowance.
     private var currentSize: CGSize {
         CGSize(
-            width: bodySize.width + topRadius * 2,
-            height: bodySize.height
+            width: bodyWidth + Metrics.topRadius * 2,
+            height: bodyHeight
         )
     }
 
-    /// The physical/closed notch silhouette that is subtracted from the software
-    /// expansion. This is the key difference from the previous implementation:
-    /// NotchShelf never paints another black shape on top of/behind the hardware
-    /// notch. It only paints pixels that exist OUTSIDE the closed notch footprint.
     private var closedSilhouetteSize: CGSize {
         CGSize(
-            width: model.hardwareWidth + Metrics.closedTopRadius * 2,
+            width: model.hardwareWidth + Metrics.topRadius * 2,
             height: model.hardwareHeight
         )
     }
@@ -73,10 +46,8 @@ struct NotchShelfView: View {
     var body: some View {
         ZStack(alignment: .top) {
             NotchExtensionLayer(
-                expandedTopRadius: topRadius,
-                expandedBottomRadius: bottomRadius,
-                closedTopRadius: Metrics.closedTopRadius,
-                closedBottomRadius: Metrics.closedBottomRadius,
+                topRadius: Metrics.topRadius,
+                bottomRadius: Metrics.bottomRadius,
                 closedSilhouetteSize: closedSilhouetteSize
             )
             .frame(width: currentSize.width, height: currentSize.height)
@@ -84,7 +55,7 @@ struct NotchShelfView: View {
             if model.presented {
                 flankContent
                     .frame(width: currentSize.width, height: currentSize.height)
-                    .transition(.opacity.combined(with: .scale(scale: 0.82, anchor: .top)))
+                    .transition(.opacity)
             }
         }
         .frame(width: currentSize.width, height: currentSize.height, alignment: .top)
@@ -94,7 +65,7 @@ struct NotchShelfView: View {
                 : .spring(response: Metrics.closeResponse, dampingFraction: Metrics.closeDamping),
             value: model.presented
         )
-        .animation(.smooth(duration: 0.16), value: model.state)
+        .animation(.smooth(duration: 0.14), value: model.state)
         .frame(
             width: Metrics.windowSize.width,
             height: Metrics.windowSize.height,
@@ -102,51 +73,35 @@ struct NotchShelfView: View {
         )
     }
 
-    /// Glance-style flank layout: [left content] [physical camera cutout] [right content].
-    /// The middle stays completely empty. The black underneath it is the real notch,
-    /// not a second software capsule.
+    // Layout is deliberately [small icon] [real hardware notch] [small status].
+    // The center remains empty and transparent in software.
     private var flankContent: some View {
         HStack(spacing: 0) {
-            leftFlank
-                .frame(width: Metrics.contentWidth, height: currentSize.height)
+            stagedIcon(size: 17)
+                .frame(width: Metrics.contentWidth, height: bodyHeight)
 
             Spacer(minLength: 0)
 
-            rightFlank
-                .frame(width: Metrics.contentWidth, height: currentSize.height)
+            rightStatus
+                .frame(width: Metrics.contentWidth, height: bodyHeight)
         }
-        .padding(.horizontal, Metrics.contentEdgeInset + topRadius)
-        .frame(width: currentSize.width, height: currentSize.height)
+        .padding(.horizontal, Metrics.contentEdgeInset + Metrics.topRadius)
+        .frame(width: currentSize.width, height: bodyHeight)
         .foregroundStyle(.white)
     }
 
     @ViewBuilder
-    private var leftFlank: some View {
-        switch model.state {
-        case .staged, .moving:
-            stagedIcon(size: 18)
-
-        case .success:
-            Image(systemName: "checkmark")
-                .font(.system(size: 14, weight: .bold))
-                .contentTransition(.symbolEffect(.replace))
-
-        case .failure:
-            Image(systemName: "exclamationmark")
-                .font(.system(size: 14, weight: .bold))
-        }
-    }
-
-    @ViewBuilder
-    private var rightFlank: some View {
+    private var rightStatus: some View {
         switch model.state {
         case .staged:
             if model.itemCount > 1 {
                 Text("\(model.itemCount)")
                     .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
             } else {
                 Image(systemName: "tray.full.fill")
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
             }
 
         case .moving:
@@ -155,12 +110,16 @@ struct NotchShelfView: View {
                 .tint(.white)
 
         case .success:
-            Image(systemName: "tray.fill")
-                .font(.system(size: 13, weight: .semibold))
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.green)
+                .contentTransition(.symbolEffect(.replace))
 
         case .failure:
-            Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .bold))
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.red)
+                .contentTransition(.symbolEffect(.replace))
         }
     }
 
@@ -176,41 +135,37 @@ struct NotchShelfView: View {
             Image(systemName: model.itemCount > 1 ? "doc.on.doc.fill" : "doc.fill")
                 .font(.system(size: size * 0.74, weight: .semibold))
                 .frame(width: size, height: size)
+                .foregroundStyle(.white.opacity(0.94))
         }
     }
 }
 
-/// Draws only the DELTA between the expanded software notch and the closed
-/// physical-notch silhouette. Using destinationOut here prevents the app from
-/// ever rendering a second full black notch/pill behind the real camera cutout.
+/// Draws only the extra pixels outside the physical notch footprint. The center
+/// is punched out, so NotchShelf never paints a second black notch behind the
+/// real camera housing.
 private struct NotchExtensionLayer: View {
-    let expandedTopRadius: CGFloat
-    let expandedBottomRadius: CGFloat
-    let closedTopRadius: CGFloat
-    let closedBottomRadius: CGFloat
+    let topRadius: CGFloat
+    let bottomRadius: CGFloat
     let closedSilhouetteSize: CGSize
 
     var body: some View {
         Canvas { context, size in
-            let expandedRect = CGRect(origin: .zero, size: size)
             let expandedPath = NotchShelfShape(
-                topRadius: expandedTopRadius,
-                bottomRadius: expandedBottomRadius
-            ).path(in: expandedRect)
+                topRadius: topRadius,
+                bottomRadius: bottomRadius
+            ).path(in: CGRect(origin: .zero, size: size))
 
             context.fill(expandedPath, with: .color(.black))
 
-            // Punch the real notch footprint out of our software layer.
-            // The hole is top-centered because both Glance and NotchShelf anchor
-            // the physical notch to the top center of the fixed transparent window.
-            let closedOrigin = CGPoint(
+            let closedRect = CGRect(
                 x: (size.width - closedSilhouetteSize.width) / 2,
-                y: 0
+                y: 0,
+                width: closedSilhouetteSize.width,
+                height: closedSilhouetteSize.height
             )
-            let closedRect = CGRect(origin: closedOrigin, size: closedSilhouetteSize)
             let closedPath = NotchShelfShape(
-                topRadius: closedTopRadius,
-                bottomRadius: closedBottomRadius
+                topRadius: topRadius,
+                bottomRadius: bottomRadius
             ).path(in: closedRect)
 
             context.blendMode = .destinationOut
@@ -221,9 +176,9 @@ private struct NotchExtensionLayer: View {
     }
 }
 
-/// Port of the physical-notch path used by jonnyoo/glance (MIT).
-/// Top corners are concave flares into the menu bar. Bottom corners use
-/// SwiftUI continuous-corner geometry rather than a capsule/rounded rectangle.
+/// Port of the physical-notch silhouette approach used by jonnyoo/glance (MIT).
+/// It keeps concave top flares and continuous bottom corners, but in NotchShelf
+/// the silhouette only widens; its height never changes.
 private struct NotchShelfShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
@@ -248,15 +203,14 @@ private struct NotchShelfShape: Shape {
             control: CGPoint(x: rect.minX + top, y: rect.minY)
         )
 
-        if let corners = ContinuousNotchCorner.bottomCorners(
-            bodyRect: CGRect(
-                x: rect.minX + top,
-                y: rect.minY,
-                width: rect.width - 2 * top,
-                height: rect.height
-            ),
-            radius: bottom
-        ) {
+        let bodyRect = CGRect(
+            x: rect.minX + top,
+            y: rect.minY,
+            width: rect.width - 2 * top,
+            height: rect.height
+        )
+
+        if let corners = ContinuousNotchCorner.bottomCorners(bodyRect: bodyRect, radius: bottom) {
             path.addLine(to: corners.leftEdgeReach)
             for segment in corners.left {
                 path.addCurve(to: segment.to, control1: segment.control1, control2: segment.control2)
