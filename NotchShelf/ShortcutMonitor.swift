@@ -1,119 +1,208 @@
 import AppKit
-import ApplicationServices
-import CoreGraphics
+import Carbon.HIToolbox
 
 @MainActor
 final class ShortcutMonitor {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
+    private enum HotKeyKind: UInt32 {
+        case cut = 1
+        case paste = 2
+    }
+
+    /// "NSHF". Used to make sure we only handle hotkeys registered by NotchShelf.
+    private let hotKeySignature: OSType = 0x4E534846
+
+    private var cutHotKey: EventHotKeyRef?
+    private var pasteHotKey: EventHotKeyRef?
+    private var eventHandler: EventHandlerRef?
+    private var activationObserver: NSObjectProtocol?
 
     var onCut: (() -> Void)?
     var onPaste: (() -> Void)?
     var shouldCapturePaste: (() -> Bool)?
     var isFinderFrontmost: (() -> Bool)?
 
-    static func requestPermissions() {
-        if !AXIsProcessTrusted() {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        }
-
-        if !CGPreflightListenEventAccess() {
-            _ = CGRequestListenEventAccess()
-        }
-    }
-
-    static func logPermissionStatus(prefix: String = "[NotchShelf]") {
-        let accessibility = AXIsProcessTrusted()
-        let inputMonitoring = CGPreflightListenEventAccess()
-        NSLog("\(prefix) Permission status — Accessibility: \(accessibility ? "granted" : "missing"), Input Monitoring: \(inputMonitoring ? "granted" : "missing")")
-    }
-
     func start() {
-        guard eventTap == nil else { return }
-
-        Self.requestPermissions()
-
-        let accessibility = AXIsProcessTrusted()
-        let inputMonitoring = CGPreflightListenEventAccess()
-        Self.logPermissionStatus()
-
-        guard accessibility, inputMonitoring else {
-            NSLog("[NotchShelf] Keyboard monitor not started. Grant both Accessibility and Input Monitoring to this NotchShelf build, quit the app completely, then launch it again.")
+        guard eventHandler == nil else {
+            refreshRegistrations()
             return
         }
 
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let pointer = Unmanaged.passUnretained(self).toOpaque()
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
 
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: { _, type, event, userInfo in
-                guard let userInfo else { return Unmanaged.passUnretained(event) }
-                let monitor = Unmanaged<ShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+        let pointer = Unmanaged.passUnretained(self).toOpaque()
+        let status = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, event, userData in
+                guard let event, let userData else {
+                    return OSStatus(eventNotHandledErr)
+                }
+
+                var hotKeyID = EventHotKeyID()
+                let readStatus = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+
+                guard readStatus == noErr else { return readStatus }
+
+                let monitor = Unmanaged<ShortcutMonitor>
+                    .fromOpaque(userData)
+                    .takeUnretainedValue()
 
                 return MainActor.assumeIsolated {
-                    monitor.handle(type: type, event: event)
+                    monitor.handle(hotKeyID)
                 }
             },
-            userInfo: pointer
-        ) else {
-            NSLog("[NotchShelf] CGEventTap creation failed even though permissions preflight as granted. This usually means macOS TCC still trusts a different/older NotchShelf build. Reset the app's Accessibility and Input Monitoring entries, then grant the current build again.")
+            1,
+            &eventType,
+            pointer,
+            &eventHandler
+        )
+
+        guard status == noErr else {
+            NSLog("[NotchShelf] Could not install Carbon hotkey handler (OSStatus \(status))")
             return
         }
 
-        eventTap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        NSLog("[NotchShelf] Shortcut monitor started")
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshRegistrations()
+            }
+        }
+
+        refreshRegistrations()
+        NSLog("[NotchShelf] Hotkey monitor started — no Accessibility or Input Monitoring permission required")
     }
 
     func stop() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
+        unregisterCut()
+        unregisterPaste()
+
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+            self.activationObserver = nil
         }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+
+        if let eventHandler {
+            RemoveEventHandler(eventHandler)
+            self.eventHandler = nil
         }
-        eventTap = nil
-        runLoopSource = nil
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-            }
-            return Unmanaged.passUnretained(event)
+    /// Re-evaluates which shortcuts NotchShelf should own right now.
+    ///
+    /// Cmd+X is only registered while Finder is frontmost. Cmd+V is even narrower:
+    /// it is only registered while Finder is frontmost AND the shelf contains files.
+    /// That means normal paste behavior remains untouched whenever the shelf is empty.
+    func refreshRegistrations() {
+        let finderIsFrontmost = isFinderFrontmost?()
+            ?? (NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder")
+
+        guard finderIsFrontmost else {
+            unregisterCut()
+            unregisterPaste()
+            return
         }
 
-        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
-        guard isFinderFrontmost?() == true else { return Unmanaged.passUnretained(event) }
+        registerCutIfNeeded()
 
-        let flags = event.flags
-        guard flags.contains(.maskCommand) else { return Unmanaged.passUnretained(event) }
-        guard !flags.contains(.maskAlternate), !flags.contains(.maskControl), !flags.contains(.maskShift) else {
-            return Unmanaged.passUnretained(event)
+        if shouldCapturePaste?() == true {
+            registerPasteIfNeeded()
+        } else {
+            unregisterPaste()
+        }
+    }
+
+    private func registerCutIfNeeded() {
+        guard cutHotKey == nil else { return }
+
+        var ref: EventHotKeyRef?
+        let id = EventHotKeyID(signature: hotKeySignature, id: HotKeyKind.cut.rawValue)
+        let status = RegisterEventHotKey(
+            UInt32(kVK_ANSI_X),
+            UInt32(cmdKey),
+            id,
+            GetApplicationEventTarget(),
+            OptionBits(0),
+            &ref
+        )
+
+        guard status == noErr else {
+            NSLog("[NotchShelf] Could not register Cmd+X (OSStatus \(status))")
+            return
         }
 
-        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        cutHotKey = ref
+        NSLog("[NotchShelf] Cmd+X registered for Finder")
+    }
 
-        // ANSI keyboard keycodes: X = 7, V = 9.
-        if keyCode == 7 {
+    private func registerPasteIfNeeded() {
+        guard pasteHotKey == nil else { return }
+
+        var ref: EventHotKeyRef?
+        let id = EventHotKeyID(signature: hotKeySignature, id: HotKeyKind.paste.rawValue)
+        let status = RegisterEventHotKey(
+            UInt32(kVK_ANSI_V),
+            UInt32(cmdKey),
+            id,
+            GetApplicationEventTarget(),
+            OptionBits(0),
+            &ref
+        )
+
+        guard status == noErr else {
+            NSLog("[NotchShelf] Could not register Cmd+V (OSStatus \(status))")
+            return
+        }
+
+        pasteHotKey = ref
+        NSLog("[NotchShelf] Cmd+V captured while shelf has staged items")
+    }
+
+    private func unregisterCut() {
+        guard let cutHotKey else { return }
+        UnregisterEventHotKey(cutHotKey)
+        self.cutHotKey = nil
+    }
+
+    private func unregisterPaste() {
+        guard let pasteHotKey else { return }
+        UnregisterEventHotKey(pasteHotKey)
+        self.pasteHotKey = nil
+    }
+
+    private func handle(_ hotKeyID: EventHotKeyID) -> OSStatus {
+        guard hotKeyID.signature == hotKeySignature else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        switch hotKeyID.id {
+        case HotKeyKind.cut.rawValue:
             onCut?()
-            return nil
-        }
+            return noErr
 
-        if keyCode == 9, shouldCapturePaste?() == true {
+        case HotKeyKind.paste.rawValue:
+            guard shouldCapturePaste?() == true else {
+                refreshRegistrations()
+                return OSStatus(eventNotHandledErr)
+            }
             onPaste?()
-            return nil
-        }
+            return noErr
 
-        return Unmanaged.passUnretained(event)
+        default:
+            return OSStatus(eventNotHandledErr)
+        }
     }
 }
