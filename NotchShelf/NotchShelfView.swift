@@ -5,14 +5,14 @@ struct NotchShelfView: View {
     @ObservedObject var model: NotchOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var progressDepth: CGFloat {
+    private var footerDepth: CGFloat {
         guard model.presented else { return 0 }
 
         switch model.state {
+        case .staged, .failure:
+            return NotchGeometry.labelDepth
         case .moving, .success:
             return NotchGeometry.progressDepth
-        case .staged, .failure:
-            return 0
         }
     }
 
@@ -21,7 +21,7 @@ struct NotchShelfView: View {
             let surface = NotchWings(
                 geometry: geometry,
                 expansion: model.presented ? 1 : 0,
-                extraDepth: progressDepth
+                extraDepth: footerDepth
             )
 
             ZStack(alignment: .top) {
@@ -42,11 +42,10 @@ struct NotchShelfView: View {
                 .frame(width: geometry.windowSize.width, alignment: .center)
                 .mask(surface)
 
-                if model.presented && (model.state == .moving || model.state == .success) {
-                    progressBar
-                        .frame(width: progressBarWidth(for: geometry), height: 2.5)
-                        .offset(y: geometry.hardwareHeight + 3)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                if model.presented {
+                    footer(for: geometry)
+                        .offset(y: geometry.hardwareHeight)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
                 }
             }
             .frame(
@@ -65,23 +64,86 @@ struct NotchShelfView: View {
                 value: model.presented
             )
             .animation(
-                reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.9),
+                reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.9),
                 value: model.state
             )
-            .animation(.smooth(duration: 0.14), value: model.state)
             .ignoresSafeArea()
         }
     }
 
-    private func progressBarWidth(for geometry: NotchGeometry) -> CGFloat {
+    @ViewBuilder
+    private func footer(for geometry: NotchGeometry) -> some View {
+        switch model.state {
+        case .staged:
+            Text(model.itemLabel)
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(
+                    width: footerWidth(for: geometry),
+                    height: NotchGeometry.labelDepth,
+                    alignment: .center
+                )
+
+        case .moving:
+            progressFooter(
+                title: "Moving…",
+                geometry: geometry,
+                success: false
+            )
+
+        case .success:
+            progressFooter(
+                title: "Done",
+                geometry: geometry,
+                success: true
+            )
+
+        case .failure:
+            Text("Couldn't move")
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.orange.opacity(0.95))
+                .frame(
+                    width: footerWidth(for: geometry),
+                    height: NotchGeometry.labelDepth,
+                    alignment: .center
+                )
+        }
+    }
+
+    private func progressFooter(
+        title: String,
+        geometry: NotchGeometry,
+        success: Bool
+    ) -> some View {
+        VStack(spacing: 2.5) {
+            Text(title)
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(
+                    success ? Color.green.opacity(0.96) : Color.white.opacity(0.88)
+                )
+                .contentTransition(.opacity)
+
+            progressBar(success: success)
+                .frame(width: footerWidth(for: geometry), height: 2.5)
+        }
+        .frame(
+            width: footerWidth(for: geometry),
+            height: NotchGeometry.progressDepth,
+            alignment: .center
+        )
+    }
+
+    private func footerWidth(for geometry: NotchGeometry) -> CGFloat {
         geometry.hardwareWidth + 2 * (NotchGeometry.wingWidth - 8)
     }
 
-    private var progressBar: some View {
+    private func progressBar(success: Bool) -> some View {
         GeometryReader { proxy in
             let clamped = min(max(model.visualProgress, 0), 1)
-            let fillWidth = max(3, proxy.size.width * clamped)
-            let barColor: Color = model.state == .success ? .green : .accentColor
+            let fillWidth = max(2, proxy.size.width * clamped)
+            let barColor: Color = success ? .green : .accentColor
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -90,32 +152,34 @@ struct NotchShelfView: View {
                 Capsule()
                     .fill(barColor)
                     .frame(width: fillWidth)
-                    .shadow(color: barColor.opacity(0.55), radius: 3)
-
-                if model.state == .moving {
-                    LinearGradient(
-                        colors: [
-                            .clear,
-                            .white.opacity(0.72),
-                            .clear,
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: 24)
-                    .clipShape(Capsule())
-                    .offset(
-                        x: max(
-                            0,
-                            min(proxy.size.width - 24, fillWidth - 18)
-                        )
-                    )
-                    .blendMode(.screen)
-                }
+                    .shadow(color: barColor.opacity(success ? 0.38 : 0.50), radius: 2.5)
+                    .overlay(alignment: .trailing) {
+                        if !success && fillWidth > 18 {
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    .white.opacity(0.72),
+                                    .clear,
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 20)
+                            .clipShape(Capsule())
+                            .blendMode(.screen)
+                        }
+                    }
             }
         }
-        .animation(.easeOut(duration: 0.16), value: model.visualProgress)
-        .animation(.easeInOut(duration: 0.2), value: model.state)
+        .animation(
+            reduceMotion
+                ? nil
+                : (model.state == .success
+                    ? .easeOut(duration: 0.30)
+                    : .linear(duration: 0.13)),
+            value: model.visualProgress
+        )
+        .animation(.easeInOut(duration: 0.18), value: model.state)
     }
 
     @ViewBuilder
@@ -186,9 +250,9 @@ struct NotchShelfView: View {
     }
 }
 
-/// Horizontal-only software wings around the real camera cutout while staged.
-/// During a move, the same surface grows only a few points downward so a thin
-/// progress rail can live under the hardware notch without becoming a second card.
+/// Horizontal software wings around the real camera cutout. Staged adds only a
+/// tiny footer for the filename. Moving/success grows a little farther downward
+/// for a status label and progress rail, while the NSPanel itself stays fixed.
 struct NotchWings: Shape {
     let geometry: NotchGeometry
     var expansion: CGFloat
@@ -243,9 +307,9 @@ struct NotchWings: Shape {
         ))
 
         if depth > 0 {
-            // The lower bridge appears only while moving/succeeding. It connects
-            // both wings beneath the physical cutout and gives the progress rail
-            // a quiet 10pt home without altering the staged silhouette.
+            // The lower bridge connects the side wings beneath the real cutout.
+            // It is the only region allowed to exist under the center, and only
+            // for the small label/progress footer.
             let bridgeLeft = leftHardwareEdge - extent - NotchGeometry.topRadius
             let bridgeRight = rightHardwareEdge + extent + NotchGeometry.topRadius
             drawableRegions.addRect(CGRect(
