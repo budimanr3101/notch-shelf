@@ -5,15 +5,27 @@ struct NotchShelfView: View {
     @ObservedObject var model: NotchOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var progressDepth: CGFloat {
+        guard model.presented else { return 0 }
+
+        switch model.state {
+        case .moving, .success:
+            return NotchGeometry.progressDepth
+        case .staged, .failure:
+            return 0
+        }
+    }
+
     var body: some View {
         if let geometry = model.geometry {
-            let wings = NotchWings(
+            let surface = NotchWings(
                 geometry: geometry,
-                expansion: model.presented ? 1 : 0
+                expansion: model.presented ? 1 : 0,
+                extraDepth: progressDepth
             )
 
             ZStack(alignment: .top) {
-                wings.fill(.black)
+                surface.fill(.black)
 
                 HStack(spacing: 0) {
                     leftStatus
@@ -28,12 +40,18 @@ struct NotchShelfView: View {
                 .frame(height: geometry.hardwareHeight)
                 .opacity(model.presented ? 1 : 0)
                 .frame(width: geometry.windowSize.width, alignment: .center)
-                // Status content must never leak into the hardware-notch center.
-                .mask(wings)
+                .mask(surface)
+
+                if model.presented && (model.state == .moving || model.state == .success) {
+                    progressBar
+                        .frame(width: progressBarWidth(for: geometry), height: 2.5)
+                        .offset(y: geometry.hardwareHeight + 3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
             .frame(
                 width: geometry.windowSize.width,
-                height: geometry.hardwareHeight,
+                height: geometry.windowSize.height,
                 alignment: .top
             )
             .clipped()
@@ -46,9 +64,58 @@ struct NotchShelfView: View {
                     ),
                 value: model.presented
             )
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.9),
+                value: model.state
+            )
             .animation(.smooth(duration: 0.14), value: model.state)
             .ignoresSafeArea()
         }
+    }
+
+    private func progressBarWidth(for geometry: NotchGeometry) -> CGFloat {
+        geometry.hardwareWidth + 2 * (NotchGeometry.wingWidth - 8)
+    }
+
+    private var progressBar: some View {
+        GeometryReader { proxy in
+            let clamped = min(max(model.visualProgress, 0), 1)
+            let fillWidth = max(3, proxy.size.width * clamped)
+            let barColor: Color = model.state == .success ? .green : .accentColor
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.13))
+
+                Capsule()
+                    .fill(barColor)
+                    .frame(width: fillWidth)
+                    .shadow(color: barColor.opacity(0.55), radius: 3)
+
+                if model.state == .moving {
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            .white.opacity(0.72),
+                            .clear,
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 24)
+                    .clipShape(Capsule())
+                    .offset(
+                        x: max(
+                            0,
+                            min(proxy.size.width - 24, fillWidth - 18)
+                        )
+                    )
+                    .blendMode(.screen)
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: model.visualProgress)
+        .animation(.easeInOut(duration: 0.2), value: model.state)
     }
 
     @ViewBuilder
@@ -58,6 +125,7 @@ struct NotchShelfView: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.green)
+                .transition(.scale(scale: 0.72).combined(with: .opacity))
 
         case .failure:
             Image(systemName: "exclamationmark.triangle.fill")
@@ -89,9 +157,10 @@ struct NotchShelfView: View {
                 .tint(.white)
 
         case .success:
-            Image(systemName: "tray.fill")
-                .font(.system(size: 13, weight: .semibold))
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.green)
+                .transition(.scale(scale: 0.72).combined(with: .opacity))
 
         case .failure:
             Image(systemName: "xmark")
@@ -117,23 +186,20 @@ struct NotchShelfView: View {
     }
 }
 
-/// Horizontal-only software wings around the real camera cutout.
-///
-/// The old implementation rendered one full black shape and punched an assumed
-/// notch silhouette out of the center. This version never creates that center
-/// shape at all. Only the left and right wing regions are drawable.
-///
-/// A small overlap is intentional: the measured AppKit auxiliary-area boundary
-/// and the visible antialiased edge of the physical notch are not pixel-identical.
-/// Extending each wing a few points under the hardware edge hides the bright seam
-/// without turning the center into another software pill.
+/// Horizontal-only software wings around the real camera cutout while staged.
+/// During a move, the same surface grows only a few points downward so a thin
+/// progress rail can live under the hardware notch without becoming a second card.
 struct NotchWings: Shape {
     let geometry: NotchGeometry
     var expansion: CGFloat
+    var extraDepth: CGFloat = 0
 
-    var animatableData: CGFloat {
-        get { expansion }
-        set { expansion = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(expansion, extraDepth) }
+        set {
+            expansion = newValue.first
+            extraDepth = newValue.second
+        }
     }
 
     func path(in rect: CGRect) -> Path {
@@ -142,6 +208,8 @@ struct NotchWings: Shape {
         let progress = min(max(expansion, 0), 1.08)
         let extent = NotchGeometry.wingWidth * progress
         let overlap = NotchGeometry.connectionOverlap * min(progress, 1)
+        let depth = min(max(extraDepth, 0), NotchGeometry.progressDepth)
+        let renderedHeight = geometry.hardwareHeight + depth
 
         let leftHardwareEdge = rect.midX - geometry.hardwareWidth / 2
         let rightHardwareEdge = rect.midX + geometry.hardwareWidth / 2
@@ -154,40 +222,50 @@ struct NotchWings: Shape {
             x: leftHardwareEdge - extent - NotchGeometry.topRadius,
             y: rect.minY,
             width: geometry.hardwareWidth + 2 * (extent + NotchGeometry.topRadius),
-            height: geometry.hardwareHeight
+            height: renderedHeight
         ))
 
-        // The wing masks stop slightly INSIDE the measured physical-notch edges.
-        // This 6pt bleed is what removes the visible separator line at the join.
         let leftJoin = leftHardwareEdge + overlap
         let rightJoin = rightHardwareEdge - overlap
 
-        var wingRegions = Path()
-        wingRegions.addRect(CGRect(
+        var drawableRegions = Path()
+        drawableRegions.addRect(CGRect(
             x: rect.minX,
             y: rect.minY,
             width: max(0, leftJoin - rect.minX),
             height: geometry.hardwareHeight
         ))
-        wingRegions.addRect(CGRect(
+        drawableRegions.addRect(CGRect(
             x: rightJoin,
             y: rect.minY,
             width: max(0, rect.maxX - rightJoin),
             height: geometry.hardwareHeight
         ))
 
-        // Crop the outer flare as expansion approaches zero, ensuring the idle
-        // state has literally zero software pixels.
+        if depth > 0 {
+            // The lower bridge appears only while moving/succeeding. It connects
+            // both wings beneath the physical cutout and gives the progress rail
+            // a quiet 10pt home without altering the staged silhouette.
+            let bridgeLeft = leftHardwareEdge - extent - NotchGeometry.topRadius
+            let bridgeRight = rightHardwareEdge + extent + NotchGeometry.topRadius
+            drawableRegions.addRect(CGRect(
+                x: bridgeLeft,
+                y: geometry.hardwareHeight - 1,
+                width: bridgeRight - bridgeLeft,
+                height: depth + 1
+            ))
+        }
+
         let flare = NotchGeometry.topRadius * min(progress, 1)
         let bounds = Path(CGRect(
             x: leftHardwareEdge - extent - flare,
             y: rect.minY,
             width: geometry.hardwareWidth + 2 * (extent + flare),
-            height: geometry.hardwareHeight
+            height: renderedHeight
         ))
 
         return silhouette
-            .intersection(wingRegions)
+            .intersection(drawableRegions)
             .intersection(bounds)
     }
 }
