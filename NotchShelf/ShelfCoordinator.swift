@@ -37,6 +37,7 @@ final class ShelfCoordinator {
 
     func clearShelf() {
         store.clear()
+        shortcuts.refreshRegistrations()
         overlay.hide()
         onShelfChanged?(0)
     }
@@ -45,6 +46,7 @@ final class ShelfCoordinator {
         do {
             let urls = try finder.selectedFileURLs()
             store.stage(urls)
+            shortcuts.refreshRegistrations()
             overlay.showStaged(items: urls)
             onShelfChanged?(store.count)
             NSLog("[NotchShelf] Staged \(urls.count) item(s)")
@@ -56,7 +58,10 @@ final class ShelfCoordinator {
     }
 
     private func pasteIntoFinder() {
-        guard !store.isEmpty else { return }
+        guard !store.isEmpty else {
+            shortcuts.refreshRegistrations()
+            return
+        }
 
         do {
             let destination = try finder.currentDestinationURL()
@@ -68,6 +73,7 @@ final class ShelfCoordinator {
 
                 if let errorMessage = result.errorMessage {
                     self.store.replace(with: result.remaining)
+                    self.shortcuts.refreshRegistrations()
                     self.overlay.showFailure(errorMessage, remainingItems: result.remaining)
                     self.onShelfChanged?(self.store.count)
                     NSSound.beep()
@@ -76,11 +82,13 @@ final class ShelfCoordinator {
                 }
 
                 self.store.clear()
+                self.shortcuts.refreshRegistrations()
                 self.overlay.showSuccess(count: result.moved.count)
                 self.onShelfChanged?(0)
                 NSLog("[NotchShelf] Moved \(result.moved.count) item(s) to \(destination.path)")
             }
         } catch {
+            shortcuts.refreshRegistrations()
             overlay.showFailure(error.localizedDescription, remainingItems: store.items)
             NSSound.beep()
             NSLog("[NotchShelf] Paste failed: \(error.localizedDescription)")
