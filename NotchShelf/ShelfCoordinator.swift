@@ -36,90 +36,20 @@ final class ShelfCoordinator {
     private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
 
     private static let openerCatalog: [DropOpenerDefinition] = [
-        .init(
-            id: "finder",
-            displayName: "Finder",
-            bundleIdentifier: "com.apple.finder",
-            behavior: .finder
-        ),
-        .init(
-            id: "terminal",
-            displayName: "Terminal",
-            bundleIdentifier: "com.apple.Terminal",
-            behavior: .application(terminalLike: true)
-        ),
-        .init(
-            id: "iterm2",
-            displayName: "iTerm2",
-            bundleIdentifier: "com.googlecode.iterm2",
-            behavior: .application(terminalLike: true)
-        ),
-        .init(
-            id: "vscode",
-            displayName: "Visual Studio Code",
-            bundleIdentifier: "com.microsoft.VSCode",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "cursor",
-            displayName: "Cursor",
-            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "xcode",
-            displayName: "Xcode",
-            bundleIdentifier: "com.apple.dt.Xcode",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "intellij",
-            displayName: "IntelliJ IDEA",
-            bundleIdentifier: "com.jetbrains.intellij",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "webstorm",
-            displayName: "WebStorm",
-            bundleIdentifier: "com.jetbrains.WebStorm",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "pycharm",
-            displayName: "PyCharm",
-            bundleIdentifier: "com.jetbrains.PyCharm",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "goland",
-            displayName: "GoLand",
-            bundleIdentifier: "com.jetbrains.goland",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "rider",
-            displayName: "Rider",
-            bundleIdentifier: "com.jetbrains.rider",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "datagrip",
-            displayName: "DataGrip",
-            bundleIdentifier: "com.jetbrains.datagrip",
-            behavior: .application(terminalLike: false)
-        ),
-        .init(
-            id: "warp",
-            displayName: "Warp",
-            bundleIdentifier: "dev.warp.Warp-Stable",
-            behavior: .application(terminalLike: true)
-        ),
-        .init(
-            id: "zed",
-            displayName: "Zed",
-            bundleIdentifier: "dev.zed.Zed",
-            behavior: .application(terminalLike: false)
-        ),
+        .init(id: "finder", displayName: "Finder", bundleIdentifier: "com.apple.finder", behavior: .finder),
+        .init(id: "terminal", displayName: "Terminal", bundleIdentifier: "com.apple.Terminal", behavior: .application(terminalLike: true)),
+        .init(id: "iterm2", displayName: "iTerm2", bundleIdentifier: "com.googlecode.iterm2", behavior: .application(terminalLike: true)),
+        .init(id: "vscode", displayName: "Visual Studio Code", bundleIdentifier: "com.microsoft.VSCode", behavior: .application(terminalLike: false)),
+        .init(id: "cursor", displayName: "Cursor", bundleIdentifier: "com.todesktop.230313mzl4w4u92", behavior: .application(terminalLike: false)),
+        .init(id: "xcode", displayName: "Xcode", bundleIdentifier: "com.apple.dt.Xcode", behavior: .application(terminalLike: false)),
+        .init(id: "intellij", displayName: "IntelliJ IDEA", bundleIdentifier: "com.jetbrains.intellij", behavior: .application(terminalLike: false)),
+        .init(id: "webstorm", displayName: "WebStorm", bundleIdentifier: "com.jetbrains.WebStorm", behavior: .application(terminalLike: false)),
+        .init(id: "pycharm", displayName: "PyCharm", bundleIdentifier: "com.jetbrains.PyCharm", behavior: .application(terminalLike: false)),
+        .init(id: "goland", displayName: "GoLand", bundleIdentifier: "com.jetbrains.goland", behavior: .application(terminalLike: false)),
+        .init(id: "rider", displayName: "Rider", bundleIdentifier: "com.jetbrains.rider", behavior: .application(terminalLike: false)),
+        .init(id: "datagrip", displayName: "DataGrip", bundleIdentifier: "com.jetbrains.datagrip", behavior: .application(terminalLike: false)),
+        .init(id: "warp", displayName: "Warp", bundleIdentifier: "dev.warp.Warp-Stable", behavior: .application(terminalLike: true)),
+        .init(id: "zed", displayName: "Zed", bundleIdentifier: "dev.zed.Zed", behavior: .application(terminalLike: false)),
     ]
 
     private let store = ShelfStore()
@@ -176,12 +106,8 @@ final class ShelfCoordinator {
         shortcuts.shouldCapturePaste = { [weak self] in
             !(self?.store.isEmpty ?? true)
         }
-        shortcuts.onCut = { [weak self] in
-            self?.cutFromFinder()
-        }
-        shortcuts.onPaste = { [weak self] in
-            self?.pasteIntoFinder()
-        }
+        shortcuts.onCut = { [weak self] in self?.cutFromFinder() }
+        shortcuts.onPaste = { [weak self] in self?.pasteIntoFinder() }
 
         projectDropTarget.onDragEntered = { [weak self] url in
             self?.previewProjectDrop(url)
@@ -262,7 +188,6 @@ final class ShelfCoordinator {
             NSSound.beep()
             return
         }
-
         openItemWithAnimatedFeedback(url)
     }
 
@@ -282,7 +207,6 @@ final class ShelfCoordinator {
 
     private func cutFromFinder() {
         cancelProjectPreviewRestore()
-
         do {
             let urls = try finder.selectedFileURLs()
             store.stage(urls)
@@ -299,7 +223,6 @@ final class ShelfCoordinator {
 
     private func pasteIntoFinder() {
         cancelProjectPreviewRestore()
-
         guard !store.isEmpty else {
             shortcuts.refreshRegistrations()
             return
@@ -345,16 +268,11 @@ final class ShelfCoordinator {
             targetAppName: opener.displayName,
             targetAppIcon: opener.appIcon
         )
-        NSLog(
-            "[NotchShelf] Drop target: %@ -> %@",
-            url.lastPathComponent,
-            opener.displayName
-        )
+        NSLog("[NotchShelf] Drop target: %@ -> %@", url.lastPathComponent, opener.displayName)
     }
 
     private func handleDroppedItem(_ url: URL) {
         cancelProjectPreviewRestore()
-
         let item = url.standardizedFileURL
         let project = projectDirectory(for: item)
         recentProject = project
@@ -450,7 +368,6 @@ final class ShelfCoordinator {
 
     private func restoreShelfOverlay() {
         cancelProjectPreviewRestore()
-
         if store.isEmpty {
             overlay.hide()
         } else {
@@ -460,9 +377,7 @@ final class ShelfCoordinator {
 
     private func scheduleRestore(after delay: TimeInterval) {
         cancelProjectPreviewRestore()
-        let work = DispatchWorkItem { [weak self] in
-            self?.restoreShelfOverlay()
-        }
+        let work = DispatchWorkItem { [weak self] in self?.restoreShelfOverlay() }
         projectPreviewTask = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
@@ -486,10 +401,8 @@ final class ShelfCoordinator {
 
     private func isDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(
-            atPath: url.path,
-            isDirectory: &isDirectory
-        ) && isDirectory.boolValue
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     private func resolveDefaultOpener() -> ResolvedDropOpener {
@@ -568,71 +481,99 @@ private extension DropOpenerDefinition.Behavior {
     }
 }
 
-// MARK: - Project Drop Zone
+// MARK: - Magnetic Project Drop Zone
 
-/// Transparent drag destination centered over the physical camera cutout.
-/// The visible Drop Zone is rendered by NotchOverlayController and grows much
-/// larger after drag-enter; this always-on panel stays over hardware-only pixels
-/// so normal menu-bar clicks are never stolen.
+/// The drag destination is hidden during normal use. While the user is actively
+/// dragging and approaches the top-center of the display, a larger invisible
+/// catch area is armed below the physical notch. This lets users release before
+/// touching macOS' top-edge Mission Control / Spaces gesture.
 @MainActor
 final class ProjectDropTarget {
     var onDragEntered: ((URL) -> Void)?
     var onDragExited: (() -> Void)?
     var onItemDropped: ((URL) -> Void)?
 
+    private static let magneticDepth: CGFloat = 92
+    private static let magneticExtraWidth: CGFloat = 190
+    private static let minimumMagneticWidth: CGFloat = 340
+    private static let dragThreshold: CGFloat = 7
+    private static let pollingInterval: TimeInterval = 0.035
+
     private var panel: ProjectDropPanel?
     private var screenObserver: NSObjectProtocol?
+    private var proximityTimer: Timer?
+    private var magneticFrame: NSRect = .zero
+    private var pressAnchor: NSPoint?
+    private var magneticActive = false
 
     func start() {
-        guard screenObserver == nil else {
-            rebuildTarget()
-            return
-        }
-
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.rebuildTarget()
+        if screenObserver == nil {
+            screenObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.rebuildTarget() }
             }
         }
 
         rebuildTarget()
+        startProximityPolling()
     }
 
     func stop() {
+        proximityTimer?.invalidate()
+        proximityTimer = nil
+        pressAnchor = nil
+        magneticActive = false
+
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
             self.screenObserver = nil
         }
+
         panel?.orderOut(nil)
         panel = nil
+    }
+
+    private func startProximityPolling() {
+        proximityTimer?.invalidate()
+
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.pollingInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.samplePointer() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        proximityTimer = timer
     }
 
     private func rebuildTarget() {
         panel?.orderOut(nil)
         panel = nil
+        magneticActive = false
+        pressAnchor = nil
 
         guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
-            NSLog("[NotchShelf] Project drop zone disabled: no physical notch")
+            magneticFrame = .zero
+            NSLog("[NotchShelf] Magnetic drop zone disabled: no physical notch")
             return
         }
 
-        let targetSize = CGSize(
-            width: geometry.hardwareWidth + 16,
-            height: geometry.hardwareHeight
+        let targetWidth = max(
+            geometry.hardwareWidth + Self.magneticExtraWidth,
+            Self.minimumMagneticWidth
         )
-        let frame = NSRect(
-            x: screen.frame.midX - targetSize.width / 2,
-            y: screen.frame.maxY - targetSize.height,
-            width: targetSize.width,
-            height: targetSize.height
+        let targetHeight = geometry.hardwareHeight + Self.magneticDepth
+        magneticFrame = NSRect(
+            x: screen.frame.midX - targetWidth / 2,
+            y: screen.frame.maxY - targetHeight,
+            width: targetWidth,
+            height: targetHeight
         )
 
-        let dropView = ProjectDropView(frame: NSRect(origin: .zero, size: targetSize))
+        let dropView = ProjectDropView(
+            frame: NSRect(origin: .zero, size: magneticFrame.size)
+        )
         dropView.autoresizingMask = [.width, .height]
         dropView.onHover = { [weak self] url in
             Task { @MainActor in self?.onDragEntered?(url) }
@@ -641,14 +582,67 @@ final class ProjectDropTarget {
             Task { @MainActor in self?.onDragExited?() }
         }
         dropView.onDrop = { [weak self] url in
-            Task { @MainActor in self?.onItemDropped?(url) }
+            Task { @MainActor in
+                self?.onItemDropped?(url)
+                self?.deactivateMagnet(notifyExit: false)
+            }
         }
 
-        let panel = ProjectDropPanel(frame: frame, dropView: dropView)
+        let panel = ProjectDropPanel(frame: magneticFrame, dropView: dropView)
         self.panel = panel
-        panel.orderFrontRegardless()
+        panel.orderOut(nil)
 
-        NSLog("[NotchShelf] Project drop zone ready: %@", NSStringFromRect(frame))
+        NSLog(
+            "[NotchShelf] Magnetic drop zone ready: %@ (release before top edge)",
+            NSStringFromRect(magneticFrame)
+        )
+    }
+
+    private func samplePointer() {
+        guard let panel, magneticFrame != .zero else { return }
+
+        let location = NSEvent.mouseLocation
+        let leftButtonDown = (NSEvent.pressedMouseButtons & 1) != 0
+
+        guard leftButtonDown else {
+            pressAnchor = nil
+            if magneticActive {
+                deactivateMagnet(notifyExit: false)
+            }
+            return
+        }
+
+        if pressAnchor == nil {
+            pressAnchor = location
+            return
+        }
+
+        let anchor = pressAnchor ?? location
+        let distance = hypot(location.x - anchor.x, location.y - anchor.y)
+        let isRealDrag = distance >= Self.dragThreshold
+        let activationFrame = magneticFrame.insetBy(dx: -18, dy: -10)
+
+        if isRealDrag && activationFrame.contains(location) {
+            if !magneticActive {
+                magneticActive = true
+                panel.orderFrontRegardless()
+                NSLog("[NotchShelf] Magnetic drop zone armed before macOS top edge")
+            }
+            return
+        }
+
+        if magneticActive && !activationFrame.contains(location) {
+            deactivateMagnet(notifyExit: true)
+        }
+    }
+
+    private func deactivateMagnet(notifyExit: Bool) {
+        guard magneticActive else { return }
+        magneticActive = false
+        panel?.orderOut(nil)
+        if notifyExit {
+            onDragExited?()
+        }
     }
 }
 
@@ -670,7 +664,7 @@ private final class ProjectDropPanel: NSPanel {
         hasShadow = false
         isMovable = false
         isReleasedWhenClosed = false
-        level = .mainMenu + 4
+        level = .mainMenu + 6
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         ignoresMouseEvents = false
         hidesOnDeactivate = false
