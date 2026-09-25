@@ -4,206 +4,143 @@ import SwiftUI
 struct NotchShelfView: View {
     @ObservedObject var model: NotchOverlayModel
 
-    private struct Layout {
-        let bodyWidth: CGFloat
-        let height: CGFloat
-        let topRadius: CGFloat
-        let bottomRadius: CGFloat
-
-        var totalWidth: CGFloat { bodyWidth + topRadius * 2 }
+    private enum Metrics {
+        // These are the same minimal-notch proportions Glance uses.
+        static let closedTopRadius: CGFloat = 8
+        static let closedBottomRadius: CGFloat = 12
+        static let openTopRadius: CGFloat = 12
+        static let openBottomRadius: CGFloat = 22
+        static let flankWidth: CGFloat = 42
+        static let heightBump: CGFloat = 12
+        static let contentEdgeInset: CGFloat = 4
+        static let windowSize = CGSize(width: 380, height: 82)
     }
 
-    private var layout: Layout {
-        let notchWidth = model.hardwareWidth
-        let notchHeight = model.hardwareHeight
-
-        guard model.presented else {
-            return Layout(
-                bodyWidth: notchWidth,
-                height: notchHeight,
-                topRadius: 8,
-                bottomRadius: 12
+    private var bodySize: CGSize {
+        if model.presented {
+            return CGSize(
+                width: model.hardwareWidth + Metrics.flankWidth * 2,
+                height: model.hardwareHeight + Metrics.heightBump
             )
         }
 
-        switch model.state {
-        case .staged where model.compact:
-            return Layout(
-                bodyWidth: notchWidth + 42,
-                height: notchHeight + 17,
-                topRadius: 9,
-                bottomRadius: 18
-            )
+        return CGSize(width: model.hardwareWidth, height: model.hardwareHeight)
+    }
 
-        case .staged:
-            return Layout(
-                bodyWidth: max(notchWidth + 108, 300),
-                height: notchHeight + 48,
-                topRadius: 13,
-                bottomRadius: 28
-            )
+    private var topRadius: CGFloat {
+        model.presented ? Metrics.openTopRadius : Metrics.closedTopRadius
+    }
 
-        case .moving:
-            return Layout(
-                bodyWidth: max(notchWidth + 118, 310),
-                height: notchHeight + 50,
-                topRadius: 13,
-                bottomRadius: 30
-            )
+    private var bottomRadius: CGFloat {
+        model.presented ? Metrics.openBottomRadius : Metrics.closedBottomRadius
+    }
 
-        case .success:
-            return Layout(
-                bodyWidth: notchWidth + 68,
-                height: notchHeight + 22,
-                topRadius: 10,
-                bottomRadius: 22
-            )
-
-        case .failure:
-            return Layout(
-                bodyWidth: max(notchWidth + 128, 326),
-                height: notchHeight + 54,
-                topRadius: 14,
-                bottomRadius: 30
-            )
-        }
+    // The flare is outside the real black body. Matching Glance here is the
+    // important bit: the body width remains the measured hardware notch width
+    // in the closed state, so it visually disappears into the physical cutout.
+    private var currentSize: CGSize {
+        CGSize(
+            width: bodySize.width + topRadius * 2,
+            height: bodySize.height
+        )
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.clear
-
-            NotchShelfShape(
-                topRadius: layout.topRadius,
-                bottomRadius: layout.bottomRadius
-            )
-            .fill(.black)
-            .frame(width: layout.totalWidth, height: layout.height)
-            .shadow(
-                color: model.presented ? .black.opacity(0.22) : .clear,
-                radius: 7,
-                x: 0,
-                y: 3
-            )
-
+        ZStack {
             if model.presented {
-                VStack(spacing: 0) {
-                    Color.clear
-                        .frame(height: model.hardwareHeight)
-
-                    shelfContent
-                        .frame(
-                            width: max(layout.bodyWidth - 28, 0),
-                            height: max(layout.height - model.hardwareHeight, 0)
-                        )
-                }
-                .frame(width: layout.bodyWidth, height: layout.height, alignment: .top)
-                .transition(.opacity.combined(with: .offset(y: -10)))
+                flankContent
+                    .blur(radius: 0)
+                    .opacity(1)
+                    .scaleEffect(1)
             }
         }
-        .frame(width: 460, height: 132, alignment: .top)
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: model.presented)
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: model.compact)
-        .animation(.spring(response: 0.38, dampingFraction: 0.84), value: model.state)
+        .frame(width: currentSize.width, height: currentSize.height)
+        .background(Color.black)
+        .clipShape(
+            NotchShelfShape(
+                topRadius: topRadius,
+                bottomRadius: bottomRadius
+            )
+        )
+        .shadow(
+            color: .black.opacity(model.presented ? 0.30 : 0),
+            radius: 9
+        )
+        .animation(
+            model.presented
+                ? .spring(response: 0.45, dampingFraction: 0.70)
+                : .spring(response: 0.45, dampingFraction: 1.0),
+            value: model.presented
+        )
+        .animation(.smooth(duration: 0.18), value: model.state)
+        .frame(
+            width: Metrics.windowSize.width,
+            height: Metrics.windowSize.height,
+            alignment: .top
+        )
+    }
+
+    /// Same layout idea as Glance's MinimalUnlockView:
+    /// [ left flank ][ physical camera cutout ][ right flank ]
+    /// Nothing is drawn over the actual notch in the middle.
+    private var flankContent: some View {
+        HStack(spacing: 0) {
+            leftFlank
+                .frame(width: 40, height: currentSize.height)
+
+            Spacer(minLength: 0)
+
+            rightFlank
+                .frame(width: 40, height: currentSize.height)
+        }
+        .padding(.horizontal, Metrics.contentEdgeInset + topRadius)
+        .frame(width: currentSize.width, height: currentSize.height)
+        .foregroundStyle(.white)
+        .transition(.opacity.combined(with: .scale(scale: 0.72)))
     }
 
     @ViewBuilder
-    private var shelfContent: some View {
+    private var leftFlank: some View {
         switch model.state {
-        case .staged where model.compact:
-            compactStagedContent
-
-        case .staged:
-            HStack(spacing: 10) {
-                stagedIcon(size: 24)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.title)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Text("⌘V to move")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6)
-
-        case .moving:
-            HStack(spacing: 10) {
-                stagedIcon(size: 23)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.title)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Text(model.subtitle)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: 2)
-
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.white)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6)
+        case .staged, .moving:
+            stagedIcon(size: 18)
 
         case .success:
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .bold))
-                Text(model.title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(.white)
+            Image(systemName: "checkmark")
+                .font(.system(size: 15, weight: .bold))
+                .contentTransition(.symbolEffect(.replace))
 
         case .failure:
-            HStack(spacing: 9) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 13, weight: .semibold))
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.title)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(model.subtitle)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6)
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 15, weight: .bold))
         }
     }
 
-    private var compactStagedContent: some View {
-        HStack(spacing: 6) {
-            stagedIcon(size: 15)
-
+    @ViewBuilder
+    private var rightFlank: some View {
+        switch model.state {
+        case .staged:
             if model.itemCount > 1 {
                 Text("\(model.itemCount)")
-                    .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.86))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+            } else {
+                Image(systemName: "tray.full.fill")
+                    .font(.system(size: 14, weight: .semibold))
             }
+
+        case .moving:
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.white)
+
+        case .success:
+            Image(systemName: "tray.fill")
+                .font(.system(size: 14, weight: .semibold))
+
+        case .failure:
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .bold))
         }
-        .foregroundStyle(.white)
-        .transition(.opacity.combined(with: .scale(scale: 0.84, anchor: .top)))
     }
 
     @ViewBuilder
@@ -216,15 +153,15 @@ struct NotchShelfView: View {
                 .frame(width: size, height: size)
         } else {
             Image(systemName: model.itemCount > 1 ? "doc.on.doc.fill" : "doc.fill")
-                .font(.system(size: size * 0.72, weight: .semibold))
+                .font(.system(size: size * 0.74, weight: .semibold))
                 .frame(width: size, height: size)
         }
     }
 }
 
-/// Adapted from the notch silhouette approach used by jonnyoo/glance (MIT):
-/// concave top flares merge into the menu-bar edge while Apple's continuous
-/// bottom corners make the expansion read as part of the physical notch.
+/// Adapted from jonnyoo/glance's MIT-licensed NotchShape.
+/// The top corners flare outward into the menu-bar edge; bottom corners use
+/// SwiftUI's continuous geometry so the expansion reads as one physical notch.
 private struct NotchShelfShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
@@ -239,47 +176,34 @@ private struct NotchShelfShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         let top = max(0, min(topRadius, rect.width / 2))
-        let availableBodyHalfWidth = max(0, rect.width / 2 - top)
-        let bottom = max(0, min(bottomRadius, min(availableBodyHalfWidth, rect.height)))
+        let bottom = max(0, min(bottomRadius, min(rect.width / 2 - top, rect.height)))
 
         var path = Path()
-
-        // Concave flare into the screen edge on the left.
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
         path.addQuadCurve(
             to: CGPoint(x: rect.minX + top, y: rect.minY + top),
             control: CGPoint(x: rect.minX + top, y: rect.minY)
         )
 
-        let bodyRect = CGRect(
-            x: rect.minX + top,
-            y: rect.minY,
-            width: rect.width - 2 * top,
-            height: rect.height
-        )
-
-        if let corners = ContinuousNotchCorner.bottomCorners(bodyRect: bodyRect, radius: bottom) {
+        if let corners = ContinuousNotchCorner.bottomCorners(
+            bodyRect: CGRect(
+                x: rect.minX + top,
+                y: rect.minY,
+                width: rect.width - 2 * top,
+                height: rect.height
+            ),
+            radius: bottom
+        ) {
             path.addLine(to: corners.leftEdgeReach)
             for segment in corners.left {
-                path.addCurve(
-                    to: segment.to,
-                    control1: segment.control1,
-                    control2: segment.control2
-                )
+                path.addCurve(to: segment.to, control1: segment.control1, control2: segment.control2)
             }
-
             path.addLine(to: corners.bottomEdgeRightReach)
             for segment in corners.right {
-                path.addCurve(
-                    to: segment.to,
-                    control1: segment.control1,
-                    control2: segment.control2
-                )
+                path.addCurve(to: segment.to, control1: segment.control1, control2: segment.control2)
             }
-
             path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
         } else {
-            // Defensive fallback for a future SwiftUI path-emission change.
             path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
             path.addQuadCurve(
                 to: CGPoint(x: rect.minX + top + bottom, y: rect.maxY),
@@ -293,12 +217,10 @@ private struct NotchShelfShape: Shape {
             path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
         }
 
-        // Matching concave flare into the screen edge on the right.
         path.addQuadCurve(
             to: CGPoint(x: rect.maxX, y: rect.minY),
             control: CGPoint(x: rect.maxX - top, y: rect.minY)
         )
-
         path.closeSubpath()
         return path
     }
@@ -339,9 +261,7 @@ private enum ContinuousNotchCorner {
               case .curve(let p6, let c6a, let c6b) = elements[6],
               case .curve(let p7, let c7a, let c7b) = elements[7],
               case .curve(let p8, let c8a, let c8b) = elements[8]
-        else {
-            return nil
-        }
+        else { return nil }
 
         return BottomCorners(
             leftEdgeReach: p8,
