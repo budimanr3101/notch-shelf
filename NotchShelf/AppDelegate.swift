@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
 
     private let coordinator = ShelfCoordinator()
-    private let pocketbook = PocketbookFeature()
+    private let pocketbook = PocketbookFeatureV3()
 
     private var statusItem: NSStatusItem?
     private var shelfStatusItem: NSMenuItem?
