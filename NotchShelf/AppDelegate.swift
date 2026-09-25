@@ -262,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(id, forKey: Self.defaultOpenerDefaultsKey)
         coordinator.openRecentWithDefaultApp()
 
-        if let previousDefault {
+        if let previousDefault = previousDefault {
             defaults.set(previousDefault, forKey: Self.defaultOpenerDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.defaultOpenerDefaultsKey)
@@ -274,13 +274,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func restoreDefaults(previousDefault: String?, previousCustomPath: String?) {
         let defaults = UserDefaults.standard
 
-        if let previousDefault {
+        if let previousDefault = previousDefault {
             defaults.set(previousDefault, forKey: Self.defaultOpenerDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.defaultOpenerDefaultsKey)
         }
 
-        if let previousCustomPath {
+        if let previousCustomPath = previousCustomPath {
             defaults.set(previousCustomPath, forKey: Self.customOpenerPathDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.customOpenerPathDefaultsKey)
