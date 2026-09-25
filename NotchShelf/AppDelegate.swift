@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = ShelfCoordinator()
     private var statusItem: NSStatusItem?
