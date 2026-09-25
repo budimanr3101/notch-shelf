@@ -25,7 +25,9 @@ struct NotchShelfView: View {
             )
 
             ZStack(alignment: .top) {
-                surface.fill(.black)
+                surface
+                    .fill(.black)
+                    .zIndex(0)
 
                 HStack(spacing: 0) {
                     leftStatus
@@ -41,11 +43,21 @@ struct NotchShelfView: View {
                 .opacity(model.presented ? 1 : 0)
                 .frame(width: geometry.windowSize.width, alignment: .center)
                 .mask(surface)
+                .zIndex(1)
 
                 if model.presented {
                     footer(for: geometry)
-                        .offset(y: geometry.hardwareHeight)
-                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                        // Pin the footer inside the lower black extension instead of
+                        // relying on an offset from a content-sized child. This makes
+                        // the filename visible even when NSHostingView has no intrinsic sizing.
+                        .position(
+                            x: geometry.windowSize.width / 2,
+                            y: geometry.hardwareHeight + footerDepth / 2
+                        )
+                        .transition(
+                            .opacity.combined(with: .scale(scale: 0.97, anchor: .top))
+                        )
+                        .zIndex(2)
                 }
             }
             .frame(
@@ -75,11 +87,12 @@ struct NotchShelfView: View {
     private func footer(for geometry: NotchGeometry) -> some View {
         switch model.state {
         case .staged:
-            Text(model.itemLabel)
-                .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.86))
+            Text(model.itemLabel.isEmpty ? "Selected file" : model.itemLabel)
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.96))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .minimumScaleFactor(0.75)
                 .frame(
                     width: footerWidth(for: geometry),
                     height: NotchGeometry.labelDepth,
@@ -102,7 +115,7 @@ struct NotchShelfView: View {
 
         case .failure:
             Text("Couldn't move")
-                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.orange.opacity(0.95))
                 .frame(
                     width: footerWidth(for: geometry),
@@ -119,9 +132,9 @@ struct NotchShelfView: View {
     ) -> some View {
         VStack(spacing: 2.5) {
             Text(title)
-                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(
-                    success ? Color.green.opacity(0.96) : Color.white.opacity(0.88)
+                    success ? Color.green.opacity(0.96) : Color.white.opacity(0.92)
                 )
                 .contentTransition(.opacity)
 
@@ -136,7 +149,7 @@ struct NotchShelfView: View {
     }
 
     private func footerWidth(for geometry: NotchGeometry) -> CGFloat {
-        geometry.hardwareWidth + 2 * (NotchGeometry.wingWidth - 8)
+        geometry.hardwareWidth + 2 * (NotchGeometry.wingWidth - 10)
     }
 
     private func progressBar(success: Bool) -> some View {
