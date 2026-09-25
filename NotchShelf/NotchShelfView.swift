@@ -8,20 +8,20 @@ struct NotchShelfView: View {
     private var isDropState: Bool {
         switch model.state {
         case .dropHover, .dropOpening, .dropSuccess, .dropFailure:
-            true
+            return true
         default:
-            false
+            return false
         }
     }
 
     private var activeWingWidth: CGFloat {
         switch model.state {
         case .dropHover, .dropOpening, .dropSuccess, .dropFailure:
-            NotchGeometry.dropWingWidth
+            return NotchGeometry.dropWingWidth
         case .notice:
-            58
+            return 58
         default:
-            NotchGeometry.wingWidth
+            return NotchGeometry.wingWidth
         }
     }
 
@@ -30,13 +30,13 @@ struct NotchShelfView: View {
 
         switch model.state {
         case .staged, .failure:
-            NotchGeometry.labelDepth
+            return NotchGeometry.labelDepth
         case .moving, .success:
-            NotchGeometry.progressDepth
+            return NotchGeometry.progressDepth
         case .dropHover, .dropOpening, .dropSuccess, .dropFailure:
-            NotchGeometry.dropDepth
+            return NotchGeometry.dropDepth
         case .notice:
-            NotchGeometry.noticeDepth
+            return NotchGeometry.noticeDepth
         }
     }
 
@@ -225,11 +225,11 @@ struct NotchShelfView: View {
     private func dropSubtitleColor(for mode: DropRailMode) -> Color {
         switch mode {
         case .success:
-            .green.opacity(0.96)
+            return .green.opacity(0.96)
         case .failure:
-            .red.opacity(0.92)
+            return .red.opacity(0.92)
         case .hover, .opening:
-            .white.opacity(0.68)
+            return .white.opacity(0.68)
         }
     }
 
