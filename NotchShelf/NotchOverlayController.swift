@@ -15,6 +15,7 @@ final class NotchOverlayModel: ObservableObject {
     @Published var presented = false
     @Published var geometry: NotchGeometry?
     @Published var fileIcon: NSImage?
+    @Published var visualProgress: CGFloat = 0
 }
 
 struct NotchGeometry: Equatable {
@@ -24,16 +25,22 @@ struct NotchGeometry: Equatable {
     static let wingWidth: CGFloat = 42
     static let topRadius: CGFloat = 8
     static let bottomRadius: CGFloat = 12
-    static let connectionOverlap: CGFloat = 6
+    static let connectionOverlap: CGFloat = 10
+    static let progressDepth: CGFloat = 10
+    static let progressBottomSlack: CGFloat = 2
 
     var expandedWidth: CGFloat {
         hardwareWidth + 2 * (Self.wingWidth + Self.topRadius)
     }
 
     /// Fixed for one display configuration. Width includes room for horizontal
-    /// spring overshoot; height intentionally equals the real notch band.
+    /// spring overshoot. Height includes the maximum subtle progress extension,
+    /// but staged/idle pixels remain transparent below the hardware notch band.
     var windowSize: CGSize {
-        CGSize(width: expandedWidth + 32, height: hardwareHeight)
+        CGSize(
+            width: expandedWidth + 32,
+            height: hardwareHeight + Self.progressDepth + Self.progressBottomSlack
+        )
     }
 
     static func measure(_ screen: NSScreen) -> NotchGeometry? {
@@ -58,7 +65,8 @@ struct NotchGeometry: Equatable {
 }
 
 /// Fixed transparent panel anchored to the physical notch band.
-/// The panel never resizes during an animation; SwiftUI only changes the wing paths.
+/// The panel never resizes during an animation; SwiftUI changes only the surface
+/// drawn inside this envelope.
 private final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -99,6 +107,7 @@ final class NotchOverlayController {
     private var returnToStagedTask: DispatchWorkItem?
     private var closeTask: DispatchWorkItem?
     private var revealTask: DispatchWorkItem?
+    private var progressTask: DispatchWorkItem?
     private var lastLoggedGeometryKey: String?
 
     init() {
@@ -128,6 +137,7 @@ final class NotchOverlayController {
         model.state = .staged
         model.itemCount = items.count
         model.fileIcon = fileIcon(for: items)
+        model.visualProgress = 0
         revealFromHardwareNotchIfNeeded()
     }
 
@@ -138,7 +148,9 @@ final class NotchOverlayController {
         model.state = .moving
         model.itemCount = items.count
         model.fileIcon = fileIcon(for: items)
+        model.visualProgress = 0.08
         revealFromHardwareNotchIfNeeded()
+        startVisualProgress()
     }
 
     func showSuccess(count: Int) {
@@ -147,8 +159,9 @@ final class NotchOverlayController {
 
         model.state = .success
         model.itemCount = count
+        model.visualProgress = 1
         revealFromHardwareNotchIfNeeded()
-        scheduleDismiss(after: 0.72)
+        scheduleDismiss(after: 0.95)
     }
 
     func showFailure(_ message: String, remainingItems: [URL]) {
@@ -157,6 +170,7 @@ final class NotchOverlayController {
 
         model.state = .failure
         model.itemCount = remainingItems.count
+        model.visualProgress = 0
         if !remainingItems.isEmpty {
             model.fileIcon = fileIcon(for: remainingItems)
         }
@@ -206,7 +220,7 @@ final class NotchOverlayController {
         if key != lastLoggedGeometryKey {
             lastLoggedGeometryKey = key
             NSLog(
-                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f",
+                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f progressDepth=%.1f",
                 screen.localizedName,
                 NSStringFromRect(screen.frame),
                 screen.safeAreaInsets.top,
@@ -217,7 +231,8 @@ final class NotchOverlayController {
                 NSStringFromRect(panel.frame),
                 geometry.expandedWidth,
                 geometry.hardwareHeight,
-                NotchGeometry.connectionOverlap
+                NotchGeometry.connectionOverlap,
+                NotchGeometry.progressDepth
             )
         }
 
@@ -233,7 +248,7 @@ final class NotchOverlayController {
         }
 
         // Frame zero is completely transparent. The next run-loop turn grows only
-        // the horizontal wings from the physical notch edges.
+        // the software surface from the physical notch edges.
         model.presented = false
         panel.orderFrontRegardless()
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -249,6 +264,8 @@ final class NotchOverlayController {
     private func animateClosedAndOrderOut() {
         revealTask?.cancel()
         revealTask = nil
+        progressTask?.cancel()
+        progressTask = nil
         model.presented = false
 
         let work = DispatchWorkItem { [weak self] in
@@ -256,6 +273,37 @@ final class NotchOverlayController {
         }
         closeTask = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+    }
+
+    /// FileManager does not currently expose byte-level progress through our move
+    /// service, so the notch uses a visual progress curve: advance smoothly toward
+    /// 90% while the operation is in flight, then complete to 100% on success.
+    /// This avoids a frozen indeterminate spinner while never claiming completion
+    /// before the move actually finishes.
+    private func startVisualProgress() {
+        progressTask?.cancel()
+        progressTask = nil
+        scheduleProgressTick()
+    }
+
+    private func scheduleProgressTick() {
+        guard model.state == .moving else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.model.state == .moving else { return }
+
+            let ceiling: CGFloat = 0.90
+            let remaining = ceiling - self.model.visualProgress
+            let step = max(0.006, remaining * 0.14)
+            self.model.visualProgress = min(ceiling, self.model.visualProgress + step)
+
+            if self.model.visualProgress < ceiling - 0.002 {
+                self.scheduleProgressTick()
+            }
+        }
+
+        progressTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     private func fileIcon(for items: [URL]) -> NSImage? {
@@ -276,6 +324,8 @@ final class NotchOverlayController {
     private func cancelTimers() {
         revealTask?.cancel()
         revealTask = nil
+        progressTask?.cancel()
+        progressTask = nil
         dismissTask?.cancel()
         returnToStagedTask?.cancel()
         closeTask?.cancel()
