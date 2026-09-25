@@ -8,6 +8,11 @@ final class NotchOverlayModel: ObservableObject {
         case moving
         case success
         case failure
+        case dropHover
+        case dropOpening
+        case dropSuccess
+        case dropFailure
+        case notice
     }
 
     @Published var state: State = .staged
@@ -17,6 +22,9 @@ final class NotchOverlayModel: ObservableObject {
     @Published var fileIcon: NSImage?
     @Published var visualProgress: CGFloat = 0
     @Published var itemLabel = ""
+    @Published var actionLabel = ""
+    @Published var targetAppName = ""
+    @Published var targetAppIcon: NSImage?
 }
 
 struct NotchGeometry: Equatable {
@@ -24,29 +32,33 @@ struct NotchGeometry: Equatable {
     let hardwareHeight: CGFloat
 
     static let wingWidth: CGFloat = 42
+    static let dropWingWidth: CGFloat = 82
     static let topRadius: CGFloat = 8
     static let bottomRadius: CGFloat = 12
 
-    // Bleed slightly beneath the physical cutout edge so antialiasing never
-    // exposes a bright hairline between the hardware notch and software wings.
+    // Bleed beneath the physical edge to hide display antialias seams.
     static let connectionOverlap: CGFloat = 14
 
-    // Give the staged filename a real readable strip. Moving/success opens a bit
-    // farther for a status label plus progress rail.
+    // Compact File Shelf depths.
     static let labelDepth: CGFloat = 17
     static let progressDepth: CGFloat = 23
-    static let progressBottomSlack: CGFloat = 2
+
+    // Drop Zone deliberately opens farther so drag feedback is impossible to
+    // miss behind the physical camera housing.
+    static let dropDepth: CGFloat = 42
+    static let noticeDepth: CGFloat = 31
+    static let bottomSlack: CGFloat = 3
 
     var expandedWidth: CGFloat {
-        hardwareWidth + 2 * (Self.wingWidth + Self.topRadius)
+        hardwareWidth + 2 * (Self.dropWingWidth + Self.topRadius)
     }
 
-    /// Fixed for one display configuration. The panel itself never animates size;
-    /// staged/moving states draw different amounts inside this transparent envelope.
+    /// Fixed maximum envelope. Neither file-move nor Drop Zone animations resize
+    /// NSPanel; they only draw different surfaces inside this transparent window.
     var windowSize: CGSize {
         CGSize(
             width: expandedWidth + 32,
-            height: hardwareHeight + Self.progressDepth + Self.progressBottomSlack
+            height: hardwareHeight + Self.dropDepth + Self.bottomSlack
         )
     }
 
@@ -71,9 +83,6 @@ struct NotchGeometry: Equatable {
     }
 }
 
-/// Fixed transparent panel anchored to the physical notch band.
-/// The panel never resizes during an animation; SwiftUI changes only the surface
-/// drawn inside this envelope.
 private final class NotchWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -97,14 +106,8 @@ private final class NotchWindow: NSPanel {
         hidesOnDeactivate = false
 
         let hosting = NSHostingView(rootView: NotchShelfView(model: model))
-        // We intentionally draw inside the display's unsafe camera-cutout band.
-        // Leaving the default safe area enabled can shift the whole SwiftUI root
-        // below the physical notch and create the detached-pill look.
         hosting.safeAreaRegions = []
         hosting.sizingOptions = []
-        // Make the hosting surface explicitly fill the fixed transparent envelope.
-        // Without this, the lower filename/progress footer can be clipped by the
-        // hosting view's content-driven size even though the NSPanel is tall enough.
         hosting.frame = NSRect(origin: .zero, size: geometry.windowSize)
         hosting.autoresizingMask = [.width, .height]
         contentView = hosting
@@ -146,10 +149,13 @@ final class NotchOverlayController {
         }
     }
 
+    // MARK: File Shelf
+
     func showStaged(items: [URL]) {
         cancelTimers()
         guard preparePanel() else { return }
 
+        resetActionMetadata()
         model.state = .staged
         model.itemCount = items.count
         model.itemLabel = label(for: items)
@@ -163,6 +169,7 @@ final class NotchOverlayController {
         cancelTimers()
         guard preparePanel() else { return }
 
+        resetActionMetadata()
         model.state = .moving
         model.itemCount = items.count
         model.itemLabel = label(for: items)
@@ -174,9 +181,6 @@ final class NotchOverlayController {
     }
 
     func showSuccess(count: Int) {
-        // A same-volume move can complete in a few milliseconds. Keep the real
-        // operation fast, but give the interface enough time to visibly animate
-        // through Moving -> progress -> Done instead of flashing straight to 100%.
         guard preparePanel() else { return }
 
         successTask?.cancel()
@@ -217,9 +221,11 @@ final class NotchOverlayController {
         cancelTimers()
         guard preparePanel() else { return }
 
+        resetActionMetadata()
         model.state = .failure
         model.itemCount = remainingItems.count
         model.itemLabel = remainingItems.isEmpty ? "Move failed" : label(for: remainingItems)
+        model.actionLabel = message
         model.visualProgress = 0
         if !remainingItems.isEmpty {
             model.fileIcon = fileIcon(for: remainingItems)
@@ -238,11 +244,72 @@ final class NotchOverlayController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
+    // MARK: Developer Drop Zone
+
+    func showDropHover(item: URL, targetAppName: String, targetAppIcon: NSImage?) {
+        cancelTimers()
+        guard preparePanel() else { return }
+
+        configureDropMetadata(item: item, appName: targetAppName, appIcon: targetAppIcon)
+        model.state = .dropHover
+        model.actionLabel = "Drop to open in \(targetAppName)"
+        revealFromHardwareNotchIfNeeded()
+    }
+
+    func showDropOpening(item: URL, targetAppName: String, targetAppIcon: NSImage?) {
+        cancelTimers()
+        guard preparePanel() else { return }
+
+        configureDropMetadata(item: item, appName: targetAppName, appIcon: targetAppIcon)
+        model.state = .dropOpening
+        model.actionLabel = "Opening in \(targetAppName)…"
+        revealFromHardwareNotchIfNeeded()
+    }
+
+    func showDropSuccess(item: URL, targetAppName: String, targetAppIcon: NSImage?) {
+        cancelTimers()
+        guard preparePanel() else { return }
+
+        configureDropMetadata(item: item, appName: targetAppName, appIcon: targetAppIcon)
+        model.state = .dropSuccess
+        model.actionLabel = "Opened in \(targetAppName)"
+        revealFromHardwareNotchIfNeeded()
+    }
+
+    func showDropFailure(
+        item: URL,
+        targetAppName: String,
+        targetAppIcon: NSImage?,
+        message: String
+    ) {
+        cancelTimers()
+        guard preparePanel() else { return }
+
+        configureDropMetadata(item: item, appName: targetAppName, appIcon: targetAppIcon)
+        model.state = .dropFailure
+        model.actionLabel = message.isEmpty ? "Couldn't open in \(targetAppName)" : message
+        revealFromHardwareNotchIfNeeded()
+    }
+
+    func showNotice(title: String, subtitle: String, icon: NSImage?) {
+        cancelTimers()
+        guard preparePanel() else { return }
+
+        resetActionMetadata()
+        model.state = .notice
+        model.itemLabel = title
+        model.actionLabel = subtitle
+        model.targetAppIcon = icon
+        revealFromHardwareNotchIfNeeded()
+    }
+
     func hide() {
         cancelTimers()
         guard panel?.isVisible == true else { return }
         animateClosedAndOrderOut()
     }
+
+    // MARK: Presentation
 
     @discardableResult
     private func preparePanel() -> Bool {
@@ -270,20 +337,16 @@ final class NotchOverlayController {
         if key != lastLoggedGeometryKey {
             lastLoggedGeometryKey = key
             NSLog(
-                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f leftAux=%@ rightAux=%@ hardware=%.1fx%.1f window=%@ expanded=%.1fx%.1f overlap=%.1f stagedDepth=%.1f progressDepth=%.1f",
+                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f hardware=%.1fx%.1f window=%@ overlap=%.1f dropWing=%.1f dropDepth=%.1f",
                 screen.localizedName,
                 NSStringFromRect(screen.frame),
                 screen.safeAreaInsets.top,
-                NSStringFromRect(screen.auxiliaryTopLeftArea ?? .zero),
-                NSStringFromRect(screen.auxiliaryTopRightArea ?? .zero),
                 geometry.hardwareWidth,
                 geometry.hardwareHeight,
                 NSStringFromRect(panel.frame),
-                geometry.expandedWidth,
-                geometry.hardwareHeight,
                 NotchGeometry.connectionOverlap,
-                NotchGeometry.labelDepth,
-                NotchGeometry.progressDepth
+                NotchGeometry.dropWingWidth,
+                NotchGeometry.dropDepth
             )
         }
 
@@ -298,8 +361,6 @@ final class NotchOverlayController {
             return
         }
 
-        // Frame zero is completely transparent. The next run-loop turn grows only
-        // the software surface from the physical notch edges.
         model.presented = false
         panel.orderFrontRegardless()
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -329,9 +390,8 @@ final class NotchOverlayController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
     }
 
-    /// FileManager does not currently expose byte-level progress through our move
-    /// service, so this is a visual curve: it visibly advances toward 90% while
-    /// the operation is in flight and only reaches 100% after the move callback.
+    // MARK: File move visual progress
+
     private func startVisualProgress() {
         progressTask?.cancel()
         progressTask = nil
@@ -358,6 +418,23 @@ final class NotchOverlayController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: work)
     }
 
+    // MARK: Metadata
+
+    private func configureDropMetadata(item: URL, appName: String, appIcon: NSImage?) {
+        model.itemCount = 1
+        model.itemLabel = item.lastPathComponent
+        model.fileIcon = fileIcon(for: [item])
+        model.targetAppName = appName
+        model.targetAppIcon = appIcon
+        model.visualProgress = 0
+    }
+
+    private func resetActionMetadata() {
+        model.actionLabel = ""
+        model.targetAppName = ""
+        model.targetAppIcon = nil
+    }
+
     private func label(for items: [URL]) -> String {
         guard items.count == 1, let item = items.first else {
             return "\(items.count) items"
@@ -368,7 +445,7 @@ final class NotchOverlayController {
     private func fileIcon(for items: [URL]) -> NSImage? {
         guard items.count == 1, let url = items.first else { return nil }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: 18, height: 18)
+        icon.size = NSSize(width: 22, height: 22)
         return icon
     }
 
