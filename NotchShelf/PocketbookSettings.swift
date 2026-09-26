@@ -73,11 +73,12 @@ struct PocketbookV3SettingsView: View {
                 }
 
                 settingsCard(title: "Built-in Books") {
-                    VStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
                         ForEach(configuration.builtinBooks) { book in
                             bookToggle(book)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 settingsCard(title: "Custom JSON") {
@@ -180,28 +181,34 @@ struct PocketbookV3SettingsView: View {
     }
 
     private func bookToggle(_ book: PocketbookV3Book) -> some View {
-        Toggle(
-            isOn: Binding(
-                get: { configuration.isEnabled(book.id) },
-                set: {
-                    configuration.setEnabled(book.id, enabled: $0)
-                    onChanged()
-                }
-            )
-        ) {
-            HStack(spacing: 8) {
-                Image(systemName: book.icon)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(book.title)
-                        .font(.system(size: 12, weight: .medium))
-                    Text(book.isBuiltin ? "Built in" : "Custom JSON")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                }
+        HStack(spacing: 10) {
+            Image(systemName: book.icon)
+                .frame(width: 24, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(book.title)
+                    .font(.system(size: 12, weight: .medium))
+                Text(book.isBuiltin ? "Built in" : "Custom JSON")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
             }
+
+            Spacer(minLength: 16)
+
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { configuration.isEnabled(book.id) },
+                    set: {
+                        configuration.setEnabled(book.id, enabled: $0)
+                        onChanged()
+                    }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
         }
-        .toggleStyle(.switch)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
     }
 }
 
