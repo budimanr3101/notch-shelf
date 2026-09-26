@@ -2,17 +2,47 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
+private enum PocketbookV3Book: String, CaseIterable, Identifiable {
+    case kubernetes = "Kubernetes"
+    case aws = "AWS"
+
+    var id: String { return rawValue }
+
+    var searchPlaceholder: String {
+        switch self {
+        case .kubernetes:
+            return "Search Kubernetes…"
+        case .aws:
+            return "Search AWS…"
+        }
+    }
+}
+
 private enum PocketbookV3Kind: String, CaseIterable, Identifiable {
     case all = "All"
-    case yaml = "YAML"
-    case kubectl = "kubectl"
+    case templates = "Templates"
+    case cli = "CLI"
     case concepts = "Concepts"
 
     var id: String { return rawValue }
+
+    func label(for book: PocketbookV3Book) -> String {
+        switch self {
+        case .all:
+            return "All"
+        case .templates:
+            return book == .kubernetes ? "YAML" : "Examples"
+        case .cli:
+            return book == .kubernetes ? "kubectl" : "AWS CLI"
+        case .concepts:
+            return "Concepts"
+        }
+    }
 }
 
 private struct PocketbookV3Entry: Identifiable, Equatable {
     let id: String
+    let book: PocketbookV3Book
     let kind: PocketbookV3Kind
     let title: String
     let subtitle: String
@@ -78,12 +108,15 @@ private struct PocketbookV3Shortcut: Equatable {
 @MainActor
 private final class PocketbookV3Model: ObservableObject {
     @Published var presented = false
+    @Published var book: PocketbookV3Book = .kubernetes
     @Published var query = ""
     @Published var kind: PocketbookV3Kind = .all
     @Published var selectedID: String?
     @Published var copiedID: String?
 
-    let entries = PocketbookV3Library.kubernetes
+    var entries: [PocketbookV3Entry] {
+        return PocketbookV3Library.entries(for: book)
+    }
 
     var selected: PocketbookV3Entry? {
         guard let selectedID = selectedID else { return nil }
@@ -116,6 +149,15 @@ private final class PocketbookV3Model: ObservableObject {
         copiedID = nil
     }
 
+    func switchBook(to newBook: PocketbookV3Book) {
+        guard newBook != book else { return }
+        book = newBook
+        query = ""
+        kind = .all
+        selectedID = nil
+        copiedID = nil
+    }
+
     func copy(_ entry: PocketbookV3Entry) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(entry.content, forType: .string)
@@ -139,9 +181,9 @@ final class PocketbookFeatureV3 {
     private let model = PocketbookV3Model()
     private var shortcut: PocketbookV3Shortcut
     private var hotKey: EventHotKeyRef?
-    private var handler: EventHandlerRef?
     private var panel: PocketbookV3Panel?
     private var keyMonitor: Any?
+    private var started = false
     private var requestedVisible = false
     private var pendingPresentation: DispatchWorkItem?
     private var pendingDismissal: DispatchWorkItem?
@@ -165,61 +207,31 @@ final class PocketbookFeatureV3 {
     }
 
     func start() {
-        guard handler == nil else { return }
+        guard !started else { return }
 
-        var type = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let pointer = Unmanaged.passUnretained(self).toOpaque()
-
-        let status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            { _, event, userData in
-                guard let event = event, let userData = userData else {
-                    return OSStatus(eventNotHandledErr)
-                }
-
-                var hotKeyID = EventHotKeyID()
-                let readStatus = GetEventParameter(
-                    event,
-                    EventParamName(kEventParamDirectObject),
-                    EventParamType(typeEventHotKeyID),
-                    nil,
-                    MemoryLayout<EventHotKeyID>.size,
-                    nil,
-                    &hotKeyID
-                )
-                guard readStatus == noErr else { return readStatus }
-
-                let feature = Unmanaged<PocketbookFeatureV3>
-                    .fromOpaque(userData)
-                    .takeUnretainedValue()
-
-                return MainActor.assumeIsolated {
-                    guard hotKeyID.signature == feature.signature,
-                          hotKeyID.id == 1 else {
-                        return OSStatus(eventNotHandledErr)
-                    }
-                    feature.toggle()
-                    return noErr
-                }
-            },
-            1,
-            &type,
-            pointer,
-            &handler
-        )
-
-        guard status == noErr else {
-            NSLog("[NotchShelf] Pocketbook V3 hotkey handler failed: %d", status)
+        let handlerStatus = CarbonHotKeyCenter.shared.setHandler(
+            signature: signature,
+            id: 1
+        ) { [weak self] in
+            guard let self = self else { return OSStatus(eventNotHandledErr) }
+            self.toggle()
+            return noErr
+        }
+        guard handlerStatus == noErr else {
+            NSLog("[NotchShelf] Pocketbook shared hotkey handler failed: %d", handlerStatus)
             return
         }
 
+        started = true
         let registerStatus = registerShortcut()
+        if registerStatus != noErr {
+            CarbonHotKeyCenter.shared.removeHandler(signature: signature, id: 1)
+            started = false
+        }
+
         NSLog(registerStatus == noErr
-            ? "[NotchShelf] Pocketbook V3 ready on \(shortcut.displayString)"
-            : "[NotchShelf] Pocketbook V3 shortcut unavailable: \(shortcut.displayString)")
+            ? "[NotchShelf] Pocketbook ready on \(shortcut.displayString)"
+            : "[NotchShelf] Pocketbook shortcut unavailable: \(shortcut.displayString)")
     }
 
     func stop() {
@@ -229,16 +241,17 @@ final class PocketbookFeatureV3 {
         pendingDismissal?.cancel()
         pendingDismissal = nil
         removeKeyMonitor()
+        panel?.ignoresMouseEvents = true
         panel?.makeFirstResponder(nil)
         panel?.orderOut(nil)
         model.presented = false
 
         if let hotKey = hotKey { UnregisterEventHotKey(hotKey) }
-        if let handler = handler { RemoveEventHandler(handler) }
+        CarbonHotKeyCenter.shared.removeHandler(signature: signature, id: 1)
 
         hotKey = nil
-        handler = nil
         panel = nil
+        started = false
     }
 
     func toggle() {
@@ -251,9 +264,11 @@ final class PocketbookFeatureV3 {
 
     func show() {
         if isVisible {
+            panel?.ignoresMouseEvents = false
             panel?.makeKeyAndOrderFront(nil)
             return
         }
+
         guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
             NSSound.beep()
@@ -274,7 +289,6 @@ final class PocketbookFeatureV3 {
             height: metrics.windowSize.height
         )
 
-        // Retain the hosting view and field editor across open/close cycles.
         if panel?.frame != frame {
             panel?.makeFirstResponder(nil)
             panel?.orderOut(nil)
@@ -286,9 +300,10 @@ final class PocketbookFeatureV3 {
                 onClose: { [weak self] in self?.hide() }
             )
         }
+
         guard let panel = panel else { return }
         installKeyMonitor()
-
+        panel.ignoresMouseEvents = false
         panel.makeKeyAndOrderFront(nil)
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.displayIfNeeded()
@@ -310,11 +325,13 @@ final class PocketbookFeatureV3 {
         pendingPresentation?.cancel()
         pendingPresentation = nil
         removeKeyMonitor()
-        // End editing before the closing surface hides the search field.
+
+        // Release the physical notch area immediately. The closing animation is
+        // visual-only so File Shelf and the magnetic Drop Zone can take priority.
+        panel.ignoresMouseEvents = true
         panel.makeFirstResponder(nil)
         panel.resignKey()
         pendingDismissal?.cancel()
-
         model.presented = false
 
         let dismissal = DispatchWorkItem { [weak self, weak panel] in
@@ -324,6 +341,7 @@ final class PocketbookFeatureV3 {
             self.pendingDismissal = nil
         }
         pendingDismissal = dismissal
+
         let delay = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             ? PocketbookV3Motion.reducedDuration
             : PocketbookV3Motion.closeDuration
@@ -380,7 +398,7 @@ final class PocketbookFeatureV3 {
     }
 
     private func registerShortcut() -> OSStatus {
-        guard handler != nil else { return OSStatus(eventNotHandledErr) }
+        guard started else { return OSStatus(eventNotHandledErr) }
 
         var reference: EventHotKeyRef?
         let identifier = EventHotKeyID(signature: signature, id: 1)
@@ -438,7 +456,6 @@ final class PocketbookFeatureV3 {
 }
 
 private enum PocketbookV3Motion {
-    // Overlapping geometry phases: shoulders 0–120 ms, bridge 80–280 ms.
     static let shoulderDuration: TimeInterval = 0.12
     static let bridgeDelay: TimeInterval = 0.08
     static let bridgeDuration: TimeInterval = 0.20
@@ -470,8 +487,6 @@ private struct PocketbookV3Metrics {
         homeDepth = 228
         detailDepth = 286
         maxDepth = 294
-        // Content belongs inside the straight body edges, excluding the
-        // shoulder flare and transparent window envelope.
         contentWidth = geometry.hardwareWidth + 2 * wingWidth
 
         windowSize = CGSize(
@@ -507,8 +522,12 @@ private final class PocketbookV3Panel: NSPanel {
         hasShadow = false
         isMovable = false
         isReleasedWhenClosed = false
-        level = .mainMenu + 8
+
+        // File Shelf overlay is +3 and magnetic Drop Zone is +6. Pocketbook sits
+        // below both so operational file actions always win the physical notch.
+        level = .mainMenu + 2
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        ignoresMouseEvents = true
         hidesOnDeactivate = false
 
         let hosting = NSHostingView(
@@ -535,6 +554,7 @@ private struct PocketbookV3View: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
+    @Namespace private var bookSelection
     @Namespace private var tabSelection
     @State private var shoulderExpansion: CGFloat = 0
     @State private var bridgeExpansion: CGFloat = 0
@@ -610,6 +630,9 @@ private struct PocketbookV3View: View {
             if selectedID == nil { focusSearchWhenReady() }
             else { pendingFocus?.cancel() }
         }
+        .onChange(of: model.book) { _, _ in
+            focusSearchWhenReady()
+        }
         .onChange(of: contentVisible) { _, visible in
             if visible { focusSearchWhenReady() }
             else {
@@ -635,7 +658,6 @@ private struct PocketbookV3View: View {
             searchFocused = true
         }
         pendingFocus = focus
-        // Let the newly mounted Home field acquire its AppKit field editor.
         DispatchQueue.main.async(execute: focus)
     }
 
@@ -659,7 +681,6 @@ private struct PocketbookV3View: View {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                // Keep geometry stationary; the complete surface crossfades.
                 shoulderExpansion = 1
                 bridgeExpansion = 1
             }
@@ -726,29 +747,58 @@ private struct PocketbookV3View: View {
             Image(systemName: "book.closed.fill")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 24)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Pocketbook")
-                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.96))
-                Text("Kubernetes")
-                    .font(.system(size: 9.3, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
-            }
+            Text("Pocketbook")
+                .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.96))
 
-            Spacer()
+            Spacer(minLength: 8)
+
+            bookSwitcher
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.white.opacity(0.58))
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill(.white.opacity(0.07)))
+                    .background(Circle().fill(Color.white.opacity(0.07)))
             }
             .buttonStyle(.plain)
         }
         .frame(height: 26)
+    }
+
+    private var bookSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(PocketbookV3Book.allCases) { book in
+                Button {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.27, dampingFraction: 0.90)) {
+                        model.switchBook(to: book)
+                    }
+                } label: {
+                    ZStack {
+                        if model.book == book {
+                            Capsule()
+                                .fill(Color.white.opacity(0.11))
+                                .matchedGeometryEffect(id: "PocketbookV3Book", in: bookSelection)
+                        }
+                        Text(book.rawValue)
+                            .font(.system(size: 8.7, weight: .semibold, design: .rounded))
+                            .foregroundStyle(
+                                model.book == book
+                                    ? Color.white.opacity(0.94)
+                                    : Color.white.opacity(0.38)
+                            )
+                            .padding(.horizontal, 7)
+                    }
+                    .frame(height: 20)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.white.opacity(0.025)))
     }
 
     private var searchBar: some View {
@@ -757,7 +807,7 @@ private struct PocketbookV3View: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.38))
 
-            TextField("Search Kubernetes…", text: $model.query)
+            TextField(model.book.searchPlaceholder, text: $model.query)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .font(.system(size: 11.5, weight: .medium, design: .rounded))
@@ -802,7 +852,7 @@ private struct PocketbookV3View: View {
                                 .matchedGeometryEffect(id: "PocketbookV3Tab", in: tabSelection)
                         }
 
-                        Text(kind.rawValue)
+                        Text(kind.label(for: model.book))
                             .font(.system(size: 9.4, weight: .semibold, design: .rounded))
                             .foregroundStyle(
                                 model.kind == kind
@@ -849,9 +899,9 @@ private struct PocketbookV3View: View {
             }
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: icon(for: entry.kind))
+                Image(systemName: icon(for: entry))
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(iconColor(for: entry.kind))
+                    .foregroundStyle(iconColor(for: entry))
                     .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 1.5) {
@@ -867,7 +917,7 @@ private struct PocketbookV3View: View {
 
                 Spacer(minLength: 8)
 
-                Text(entry.kind.rawValue)
+                Text(entry.kind.label(for: entry.book))
                     .font(.system(size: 8, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.26))
 
@@ -914,9 +964,9 @@ private struct PocketbookV3View: View {
 
                 Spacer()
 
-                Text(entry.kind.rawValue)
+                Text(entry.kind.label(for: entry.book))
                     .font(.system(size: 8.4, weight: .semibold, design: .rounded))
-                    .foregroundStyle(iconColor(for: entry.kind))
+                    .foregroundStyle(iconColor(for: entry))
             }
 
             referenceBody(entry)
@@ -1003,27 +1053,36 @@ private struct PocketbookV3View: View {
         }
     }
 
-    private func icon(for kind: PocketbookV3Kind) -> String {
-        switch kind {
-        case .yaml: return "doc.text.fill"
-        case .kubectl: return "terminal.fill"
-        case .concepts: return "book.pages.fill"
-        case .all: return "book.closed.fill"
+    private func icon(for entry: PocketbookV3Entry) -> String {
+        switch entry.kind {
+        case .templates:
+            return entry.book == .kubernetes ? "doc.text.fill" : "chevron.left.forwardslash.chevron.right"
+        case .cli:
+            return "terminal.fill"
+        case .concepts:
+            return "book.pages.fill"
+        case .all:
+            return entry.book == .aws ? "cloud.fill" : "book.closed.fill"
         }
     }
 
-    private func iconColor(for kind: PocketbookV3Kind) -> Color {
-        switch kind {
-        case .yaml: return Color.accentColor.opacity(0.88)
-        case .kubectl: return Color.green.opacity(0.80)
-        case .concepts: return Color.orange.opacity(0.84)
-        case .all: return Color.white.opacity(0.65)
+    private func iconColor(for entry: PocketbookV3Entry) -> Color {
+        switch entry.kind {
+        case .templates:
+            return entry.book == .aws ? Color.orange.opacity(0.84) : Color.accentColor.opacity(0.88)
+        case .cli:
+            return entry.book == .aws ? Color.orange.opacity(0.86) : Color.green.opacity(0.80)
+        case .concepts:
+            return Color.white.opacity(0.66)
+        case .all:
+            return Color.white.opacity(0.65)
         }
     }
 
     private func codeColor(for line: String) -> Color {
         let value = line.trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("kubectl ") { return Color.green.opacity(0.86) }
+        if value.hasPrefix("aws ") { return Color.orange.opacity(0.88) }
         if value.contains("apiVersion:") || value.contains("kind:") {
             return Color.accentColor.opacity(0.90)
         }
@@ -1378,6 +1437,7 @@ private final class PocketbookV3ShortcutCaptureView: NSView {
 private enum PocketbookV3Library {
     private static func e(
         _ id: String,
+        _ book: PocketbookV3Book,
         _ kind: PocketbookV3Kind,
         _ title: String,
         _ subtitle: String,
@@ -1387,6 +1447,7 @@ private enum PocketbookV3Library {
     ) -> PocketbookV3Entry {
         return PocketbookV3Entry(
             id: id,
+            book: book,
             kind: kind,
             title: title,
             subtitle: subtitle,
@@ -1396,8 +1457,17 @@ private enum PocketbookV3Library {
         )
     }
 
+    static func entries(for book: PocketbookV3Book) -> [PocketbookV3Entry] {
+        switch book {
+        case .kubernetes:
+            return kubernetes
+        case .aws:
+            return aws
+        }
+    }
+
     static let kubernetes: [PocketbookV3Entry] = [
-        e("deployment", .yaml, "Deployment YAML", "Basic stateless workload boilerplate",
+        e("k8s-deployment", .kubernetes, .templates, "Deployment YAML", "Basic stateless workload boilerplate",
           "deployment apps replicas selector resources", """
 apiVersion: apps/v1
 kind: Deployment
@@ -1418,8 +1488,15 @@ spec:
           image: your-image:tag
           ports:
             - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
 """),
-        e("service", .yaml, "Service YAML", "ClusterIP service boilerplate",
+        e("k8s-service", .kubernetes, .templates, "Service YAML", "ClusterIP service boilerplate",
           "service clusterip targetport", """
 apiVersion: v1
 kind: Service
@@ -1429,11 +1506,12 @@ spec:
   selector:
     app: my-app
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 80
   type: ClusterIP
 """),
-        e("ingress", .yaml, "Ingress YAML", "networking.k8s.io/v1 boilerplate",
+        e("k8s-ingress", .kubernetes, .templates, "Ingress YAML", "networking.k8s.io/v1 boilerplate",
           "ingress host path backend", """
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -1452,7 +1530,7 @@ spec:
                 port:
                   number: 80
 """),
-        e("configmap", .yaml, "ConfigMap YAML", "Non-secret configuration boilerplate",
+        e("k8s-configmap", .kubernetes, .templates, "ConfigMap YAML", "Non-secret configuration boilerplate",
           "configmap env configuration", """
 apiVersion: v1
 kind: ConfigMap
@@ -1462,7 +1540,7 @@ data:
   APP_ENV: production
   LOG_LEVEL: info
 """),
-        e("secret", .yaml, "Secret YAML", "Opaque Secret structure reminder",
+        e("k8s-secret", .kubernetes, .templates, "Secret YAML", "Opaque Secret structure reminder",
           "secret opaque stringdata", """
 apiVersion: v1
 kind: Secret
@@ -1473,8 +1551,8 @@ stringData:
   username: example
   password: replace-me
 """),
-        e("statefulset", .yaml, "StatefulSet YAML", "Stable identity workload skeleton",
-          "statefulset serviceName identity", """
+        e("k8s-statefulset", .kubernetes, .templates, "StatefulSet YAML", "Stable identity workload skeleton",
+          "statefulset serviceName volumeClaimTemplates", """
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -1494,7 +1572,7 @@ spec:
         - name: my-app
           image: your-image:tag
 """),
-        e("daemonset", .yaml, "DaemonSet YAML", "One Pod per matching node",
+        e("k8s-daemonset", .kubernetes, .templates, "DaemonSet YAML", "One Pod per matching node",
           "daemonset node agent", """
 apiVersion: apps/v1
 kind: DaemonSet
@@ -1513,7 +1591,7 @@ spec:
         - name: agent
           image: your-image:tag
 """),
-        e("cronjob", .yaml, "CronJob YAML", "Scheduled Job boilerplate",
+        e("k8s-cronjob", .kubernetes, .templates, "CronJob YAML", "Scheduled Job boilerplate",
           "cronjob schedule job", """
 apiVersion: batch/v1
 kind: CronJob
@@ -1530,7 +1608,40 @@ spec:
             - name: cleanup
               image: your-image:tag
 """),
-        e("pods", .kubectl, "Pods", "Get, wide, YAML and describe",
+        e("k8s-pdb", .kubernetes, .templates, "PodDisruptionBudget YAML", "Protect voluntary availability",
+          "pdb minavailable maxunavailable drain eviction", """
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: my-app-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: my-app
+"""),
+        e("k8s-hpa", .kubernetes, .templates, "HPA YAML", "CPU-based autoscaling boilerplate",
+          "hpa autoscaling cpu replicas", """
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+"""),
+        e("k8s-pods", .kubernetes, .cli, "Pods", "Get, wide, YAML and describe",
           "pods get describe wide", """
 kubectl get pods
 kubectl get pods -o wide
@@ -1538,47 +1649,70 @@ kubectl get pod <pod> -o yaml
 kubectl describe pod <pod>
 kubectl get pods -A
 """),
-        e("logs", .kubectl, "Logs", "Follow, previous and container logs",
+        e("k8s-logs", .kubernetes, .cli, "Logs", "Follow, previous and container logs",
           "logs follow tail previous", """
 kubectl logs <pod>
 kubectl logs -f <pod>
 kubectl logs <pod> -c <container>
 kubectl logs <pod> --previous
+kubectl logs <pod> --since=10m --timestamps
 """),
-        e("exec", .kubectl, "Exec", "Interactive shell and one-shot command",
+        e("k8s-exec", .kubernetes, .cli, "Exec", "Interactive shell and one-shot command",
           "exec shell bash sh", """
 kubectl exec -it <pod> -- /bin/sh
 kubectl exec -it <pod> -- /bin/bash
 kubectl exec <pod> -- env
+kubectl exec -it <pod> -c <container> -- /bin/sh
 """),
-        e("rollout", .kubectl, "Deployment rollout", "Status, restart, history and undo",
+        e("k8s-rollout", .kubernetes, .cli, "Deployment rollout", "Status, restart, history and undo",
           "rollout restart undo history", """
 kubectl rollout status deployment/<name>
 kubectl rollout restart deployment/<name>
 kubectl rollout history deployment/<name>
 kubectl rollout undo deployment/<name>
 """),
-        e("context", .kubectl, "Context & Namespace", "See and switch kubeconfig context",
-          "context namespace config", """
+        e("k8s-context", .kubernetes, .cli, "Context & Namespace", "See and switch kubeconfig context",
+          "context namespace config current", """
 kubectl config current-context
 kubectl config get-contexts
 kubectl config use-context <context>
 kubectl config set-context --current --namespace=<namespace>
+kubectl config view --minify
 """),
-        e("events", .kubectl, "Events", "Inspect recent cluster events",
+        e("k8s-events", .kubernetes, .cli, "Events", "Inspect recent cluster events",
           "events warning troubleshoot", """
 kubectl get events
 kubectl get events --sort-by=.lastTimestamp
 kubectl get events -A --sort-by=.lastTimestamp
 kubectl get events --field-selector type=Warning
 """),
-        e("port-forward", .kubectl, "Port Forward", "Expose a Pod or Service locally",
-          "port forward localhost", """
+        e("k8s-port-forward", .kubernetes, .cli, "Port Forward", "Expose a Pod or Service locally",
+          "port forward localhost tunnel", """
 kubectl port-forward pod/<pod> 8080:80
 kubectl port-forward service/<service> 8080:80
 kubectl port-forward service/<service> 8080:80 -n <namespace>
 """),
-        e("deployment-vs-statefulset", .concepts, "Deployment vs StatefulSet",
+        e("k8s-apply", .kubernetes, .cli, "Apply, Diff & Dry Run", "Preview and apply manifests safely",
+          "apply diff dry run manifest yaml", """
+kubectl diff -f deployment.yaml
+kubectl apply --dry-run=server -f deployment.yaml
+kubectl apply -f deployment.yaml
+kubectl delete -f deployment.yaml
+"""),
+        e("k8s-nodes", .kubernetes, .cli, "Nodes", "Inspect, cordon and drain nodes",
+          "nodes cordon drain uncordon", """
+kubectl get nodes -o wide
+kubectl describe node <node>
+kubectl cordon <node>
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+kubectl uncordon <node>
+"""),
+        e("k8s-scale", .kubernetes, .cli, "Scale Workload", "Change Deployment or StatefulSet replicas",
+          "scale replicas deployment statefulset", """
+kubectl scale deployment/<name> --replicas=3
+kubectl scale statefulset/<name> --replicas=3
+"""),
+        e("k8s-deploy-vs-stateful", .kubernetes, .concepts, "Deployment vs StatefulSet",
           "Stateless vs stable identity reminder", "deployment statefulset identity storage", """
 Deployment
 • Default choice for stateless applications.
@@ -1590,7 +1724,7 @@ StatefulSet
 • Pod names stay predictable: app-0, app-1, app-2.
 • Commonly paired with persistent volumes.
 """, code: false),
-        e("probes", .concepts, "Probes", "Readiness, liveness and startup",
+        e("k8s-probes", .kubernetes, .concepts, "Probes", "Readiness, liveness and startup",
           "probe readiness liveness startup", """
 readinessProbe
 Controls whether a Pod receives Service traffic.
@@ -1601,8 +1735,8 @@ Detects a stuck container and can trigger a restart.
 startupProbe
 Protects slow-starting apps until startup succeeds.
 """, code: false),
-        e("resources", .concepts, "Requests vs Limits",
-          "Scheduler reservation vs runtime ceiling", "resources cpu memory limits requests", """
+        e("k8s-resources", .kubernetes, .concepts, "Requests vs Limits",
+          "Scheduler reservation vs runtime ceiling", "resources cpu memory limits requests oom", """
 Requests
 • Used by the scheduler when placing Pods.
 • Express resources the workload expects to need.
@@ -1612,7 +1746,7 @@ Limits
 • CPU may be throttled.
 • Exceeding memory can result in OOMKilled.
 """, code: false),
-        e("service-types", .concepts, "Service Types",
+        e("k8s-service-types", .kubernetes, .concepts, "Service Types",
           "ClusterIP, NodePort and LoadBalancer", "service clusterip nodeport loadbalancer", """
 ClusterIP
 • Default, reachable inside the cluster.
@@ -1622,6 +1756,178 @@ NodePort
 
 LoadBalancer
 • Requests an external load balancer from the cloud integration.
+""", code: false),
+        e("k8s-pdb-concept", .kubernetes, .concepts, "PodDisruptionBudget",
+          "Voluntary disruption guardrail", "pdb drain eviction disruption", """
+PodDisruptionBudget limits voluntary disruption for matching Pods.
+
+Typical cases:
+• Node drain
+• Cluster maintenance
+• Voluntary eviction
+
+Use minAvailable or maxUnavailable, not both, for a single budget.
+""", code: false),
+    ]
+
+    static let aws: [PocketbookV3Entry] = [
+        e("aws-profile-example", .aws, .templates, "Profile + Region Pattern",
+          "Pin commands to the intended account and region", "profile region account command", """
+aws sts get-caller-identity --profile <profile> --region <region>
+aws ec2 describe-instances --profile <profile> --region <region>
+aws eks list-clusters --profile <profile> --region <region>
+"""),
+        e("aws-query-example", .aws, .templates, "JMESPath + Table Output",
+          "Trim noisy JSON into an operator-friendly table", "query jmespath output table", """
+aws ec2 describe-instances \
+  --query 'Reservations[].Instances[].[InstanceId,PrivateIpAddress,InstanceType,State.Name]' \
+  --output table
+"""),
+        e("aws-assume-role-example", .aws, .templates, "AssumeRole",
+          "Request temporary credentials for another role", "sts assume role temporary credentials", """
+aws sts assume-role \
+  --role-arn arn:aws:iam::<account-id>:role/<role-name> \
+  --role-session-name notch-shelf
+"""),
+        e("aws-tag-filter-example", .aws, .templates, "Filter by Tag",
+          "Find resources using Name or custom tags", "tag filter ec2 name", """
+aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=<name>" \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --output text
+"""),
+        e("aws-identity", .aws, .cli, "Identity & Config",
+          "Confirm caller, profiles and active config", "sts identity config profile region", """
+aws sts get-caller-identity
+aws configure list
+aws configure list-profiles
+aws configure get region --profile <profile>
+"""),
+        e("aws-sso", .aws, .cli, "AWS SSO",
+          "Login and refresh an IAM Identity Center session", "sso login logout profile session", """
+aws sso login --profile <profile>
+aws sts get-caller-identity --profile <profile>
+aws sso logout
+"""),
+        e("aws-ec2", .aws, .cli, "EC2",
+          "Inspect, start and stop instances", "ec2 instance describe start stop", """
+aws ec2 describe-instances --output table
+aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
+aws ec2 start-instances --instance-ids <instance-id>
+aws ec2 stop-instances --instance-ids <instance-id>
+"""),
+        e("aws-s3", .aws, .cli, "S3",
+          "List, copy, sync and presign objects", "s3 ls cp sync presign bucket object", """
+aws s3 ls
+aws s3 ls s3://<bucket>/<prefix>/
+aws s3 cp <file> s3://<bucket>/<key>
+aws s3 sync <local-dir>/ s3://<bucket>/<prefix>/
+aws s3 presign s3://<bucket>/<key> --expires-in 3600
+"""),
+        e("aws-eks", .aws, .cli, "EKS",
+          "Clusters, kubeconfig and authentication", "eks cluster kubeconfig token kubectl", """
+aws eks list-clusters --region <region>
+aws eks describe-cluster --name <cluster> --region <region>
+aws eks update-kubeconfig --name <cluster> --region <region> --profile <profile>
+aws eks get-token --cluster-name <cluster> --region <region>
+"""),
+        e("aws-iam", .aws, .cli, "IAM Role",
+          "Inspect a role and attached policies", "iam role policy permissions", """
+aws iam get-role --role-name <role-name>
+aws iam list-attached-role-policies --role-name <role-name>
+aws iam list-role-policies --role-name <role-name>
+"""),
+        e("aws-logs", .aws, .cli, "CloudWatch Logs",
+          "Find log groups and tail recent logs", "cloudwatch logs tail follow log group", """
+aws logs describe-log-groups --log-group-name-prefix <prefix>
+aws logs tail <log-group> --since 10m
+aws logs tail <log-group> --follow --since 10m
+"""),
+        e("aws-ssm", .aws, .cli, "Systems Manager",
+          "Start Session Manager or run a shell command", "ssm session send command instance", """
+aws ssm start-session --target <instance-id>
+aws ssm send-command \
+  --instance-ids <instance-id> \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["uname -a"]'
+"""),
+        e("aws-elbv2", .aws, .cli, "ALB / NLB",
+          "Inspect load balancers and target health", "elb elbv2 alb nlb target health", """
+aws elbv2 describe-load-balancers
+aws elbv2 describe-target-groups
+aws elbv2 describe-target-health --target-group-arn <target-group-arn>
+"""),
+        e("aws-rds", .aws, .cli, "RDS",
+          "Inspect DB instances and Aurora clusters", "rds database aurora cluster instance", """
+aws rds describe-db-instances
+aws rds describe-db-clusters
+aws rds describe-db-instances --db-instance-identifier <identifier>
+"""),
+        e("aws-cloudformation", .aws, .cli, "CloudFormation",
+          "Inspect stack state and recent events", "cloudformation stack event deploy", """
+aws cloudformation describe-stacks --stack-name <stack-name>
+aws cloudformation describe-stack-events --stack-name <stack-name>
+aws cloudformation list-stack-resources --stack-name <stack-name>
+"""),
+        e("aws-profile-concept", .aws, .concepts, "Profile & Region",
+          "Two context values worth checking before every action", "profile region precedence", """
+Profile
+• Selects credentials and configuration from your AWS CLI setup.
+• Use --profile to make the intended identity explicit.
+
+Region
+• Selects the regional endpoint for most AWS services.
+• Use --region when the target region must be unambiguous.
+
+Before risky commands, verify both identity and region.
+""", code: false),
+        e("aws-sts-concept", .aws, .concepts, "STS & Temporary Credentials",
+          "Short-lived credentials behind roles and many SSO flows", "sts temporary credentials token role", """
+AWS STS issues temporary credentials.
+
+They normally contain:
+• Access key ID
+• Secret access key
+• Session token
+• Expiration
+
+Role assumption and IAM Identity Center sessions commonly rely on temporary credentials.
+Do not store temporary or long-lived secrets inside Pocketbook.
+""", code: false),
+        e("aws-arn-concept", .aws, .concepts, "ARN Anatomy",
+          "How AWS identifies resources", "arn resource partition service region account", """
+General shape:
+arn:partition:service:region:account-id:resource
+
+Example:
+arn:aws:iam::123456789012:role/MyRole
+
+Some global services leave the region field empty.
+Resource formatting varies by service.
+""", code: false),
+        e("aws-role-policy-concept", .aws, .concepts, "IAM Role vs Policy",
+          "Identity container vs permission document", "iam role policy trust permissions", """
+IAM Role
+• An identity that can be assumed.
+• Has a trust policy defining who may assume it.
+
+IAM Policy
+• A permissions document describing allowed or denied actions.
+• Can be attached to roles, users, groups, or resources depending on policy type.
+""", code: false),
+        e("aws-cli-output-concept", .aws, .concepts, "CLI Output & Query",
+          "Reduce JSON before it reaches your terminal", "output json table text query jmespath", """
+--output json
+Best when another tool will parse the result.
+
+--output table
+Good for quick human inspection.
+
+--output text
+Compact, but be careful with multi-value output.
+
+--query
+Uses JMESPath to filter or reshape the response client-side.
 """, code: false),
     ]
 }
