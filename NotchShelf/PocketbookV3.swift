@@ -244,11 +244,15 @@ final class PocketbookFeatureV3 {
             )
         }
 
-        let showBlock = { [weak self] in
-            self?.settingsController?.show()
+        let showBlock: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            self.settingsController?.show()
         }
         if wasVisible {
-            DispatchQueue.main.asyncAfter(deadline: .now() + PocketbookV3Motion.closeDuration, execute: showBlock)
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + PocketbookV3Motion.closeDuration,
+                execute: showBlock
+            )
         } else {
             showBlock()
         }
