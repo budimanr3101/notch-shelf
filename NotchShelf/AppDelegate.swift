@@ -320,7 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if let previousCustomPath = previousCustomPath {
-            defaults.set(previousCustomPath, forKey: Self.customOpenerDefaultsKey)
+            defaults.set(previousCustomPath, forKey: Self.customOpenerPathDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.customOpenerPathDefaultsKey)
         }
