@@ -18,6 +18,11 @@
 		A10000000000000000000009 /* NotchShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* NotchShelfView.swift */; };
 		A1000000000000000000000C /* Pocketbook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* Pocketbook.swift */; };
 		A1000000000000000000000D /* PocketbookV3.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* PocketbookV3.swift */; };
+		A1000000000000000000000E /* PocketbookLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* PocketbookLibrary.swift */; };
+		A1000000000000000000000F /* PocketbookConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* PocketbookConfig.swift */; };
+		A10000000000000000000010 /* PocketbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* PocketbookView.swift */; };
+		A10000000000000000000011 /* PocketbookGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* PocketbookGeometry.swift */; };
+		A10000000000000000000012 /* PocketbookSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* PocketbookSettings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +39,11 @@
 		B1000000000000000000000B /* NotchShelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotchShelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000C /* Pocketbook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pocketbook.swift; sourceTree = "<group>"; };
 		B1000000000000000000000D /* PocketbookV3.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookV3.swift; sourceTree = "<group>"; };
+		B1000000000000000000000E /* PocketbookLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookLibrary.swift; sourceTree = "<group>"; };
+		B1000000000000000000000F /* PocketbookConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookConfig.swift; sourceTree = "<group>"; };
+		B10000000000000000000010 /* PocketbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookView.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* PocketbookGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookGeometry.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* PocketbookSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookSettings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -69,6 +79,11 @@
 				B10000000000000000000009 /* NotchShelfView.swift */,
 				B1000000000000000000000C /* Pocketbook.swift */,
 				B1000000000000000000000D /* PocketbookV3.swift */,
+				B1000000000000000000000E /* PocketbookLibrary.swift */,
+				B1000000000000000000000F /* PocketbookConfig.swift */,
+				B10000000000000000000010 /* PocketbookView.swift */,
+				B10000000000000000000011 /* PocketbookGeometry.swift */,
+				B10000000000000000000012 /* PocketbookSettings.swift */,
 				B1000000000000000000000A /* Info.plist */,
 			);
 			path = NotchShelf;
@@ -161,6 +176,11 @@
 				A10000000000000000000009 /* NotchShelfView.swift in Sources */,
 				A1000000000000000000000C /* Pocketbook.swift in Sources */,
 				A1000000000000000000000D /* PocketbookV3.swift in Sources */,
+				A1000000000000000000000E /* PocketbookLibrary.swift in Sources */,
+				A1000000000000000000000F /* PocketbookConfig.swift in Sources */,
+				A10000000000000000000010 /* PocketbookView.swift in Sources */,
+				A10000000000000000000011 /* PocketbookGeometry.swift in Sources */,
+				A10000000000000000000012 /* PocketbookSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,7 +204,7 @@
 					"$(inherited)",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
