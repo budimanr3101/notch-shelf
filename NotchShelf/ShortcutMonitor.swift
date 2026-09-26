@@ -1,42 +1,50 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// A single Carbon event handler for every NotchShelf global hotkey.
+///
+/// File Shelf and Pocketbook used to install independent handlers on the same
+/// application event target. Keeping one dispatcher avoids handler ordering
+/// issues while still letting each feature register its own EventHotKeyRef.
 @MainActor
-final class ShortcutMonitor {
-    private enum HotKeyKind: UInt32 {
-        case cut = 1
-        case paste = 2
+final class CarbonHotKeyCenter {
+    static let shared = CarbonHotKeyCenter()
+
+    typealias Callback = () -> OSStatus
+
+    private var eventHandler: EventHandlerRef?
+    private var callbacks: [UInt64: Callback] = [:]
+
+    private init() {}
+
+    func setHandler(
+        signature: OSType,
+        id: UInt32,
+        callback: @escaping Callback
+    ) -> OSStatus {
+        let status = ensureEventHandler()
+        guard status == noErr else { return status }
+        callbacks[key(signature: signature, id: id)] = callback
+        return noErr
     }
 
-    /// "NSHF". Used to make sure we only handle hotkeys registered by NotchShelf.
-    private let hotKeySignature: OSType = 0x4E534846
+    func removeHandler(signature: OSType, id: UInt32) {
+        callbacks.removeValue(forKey: key(signature: signature, id: id))
+    }
 
-    private var cutHotKey: EventHotKeyRef?
-    private var pasteHotKey: EventHotKeyRef?
-    private var eventHandler: EventHandlerRef?
-    private var activationObserver: NSObjectProtocol?
-
-    var onCut: (() -> Void)?
-    var onPaste: (() -> Void)?
-    var shouldCapturePaste: (() -> Bool)?
-    var isFinderFrontmost: (() -> Bool)?
-
-    func start() {
-        guard eventHandler == nil else {
-            refreshRegistrations()
-            return
-        }
+    private func ensureEventHandler() -> OSStatus {
+        if eventHandler != nil { return noErr }
 
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
         )
-
         let pointer = Unmanaged.passUnretained(self).toOpaque()
-        let status = InstallEventHandler(
+
+        return InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData in
-                guard let event, let userData else {
+                guard let event = event, let userData = userData else {
                     return OSStatus(eventNotHandledErr)
                 }
 
@@ -50,15 +58,14 @@ final class ShortcutMonitor {
                     nil,
                     &hotKeyID
                 )
-
                 guard readStatus == noErr else { return readStatus }
 
-                let monitor = Unmanaged<ShortcutMonitor>
+                let center = Unmanaged<CarbonHotKeyCenter>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
 
                 return MainActor.assumeIsolated {
-                    monitor.handle(hotKeyID)
+                    center.dispatch(hotKeyID)
                 }
             },
             1,
@@ -66,12 +73,81 @@ final class ShortcutMonitor {
             pointer,
             &eventHandler
         )
+    }
 
-        guard status == noErr else {
-            NSLog("[NotchShelf] Could not install Carbon hotkey handler (OSStatus \(status))")
+    private func dispatch(_ hotKeyID: EventHotKeyID) -> OSStatus {
+        guard let callback = callbacks[key(signature: hotKeyID.signature, id: hotKeyID.id)] else {
+            return OSStatus(eventNotHandledErr)
+        }
+        return callback()
+    }
+
+    private func key(signature: OSType, id: UInt32) -> UInt64 {
+        return (UInt64(signature) << 32) | UInt64(id)
+    }
+}
+
+@MainActor
+final class ShortcutMonitor {
+    private enum HotKeyKind: UInt32 {
+        case cut = 1
+        case paste = 2
+    }
+
+    /// "NSHF". Used to make sure we only handle hotkeys registered by NotchShelf.
+    private let hotKeySignature: OSType = 0x4E534846
+
+    private var cutHotKey: EventHotKeyRef?
+    private var pasteHotKey: EventHotKeyRef?
+    private var activationObserver: NSObjectProtocol?
+    private var started = false
+
+    var onCut: (() -> Void)?
+    var onPaste: (() -> Void)?
+    var shouldCapturePaste: (() -> Bool)?
+    var isFinderFrontmost: (() -> Bool)?
+
+    func start() {
+        if started {
+            refreshRegistrations()
             return
         }
 
+        let cutStatus = CarbonHotKeyCenter.shared.setHandler(
+            signature: hotKeySignature,
+            id: HotKeyKind.cut.rawValue
+        ) { [weak self] in
+            guard let self = self else { return OSStatus(eventNotHandledErr) }
+            self.onCut?()
+            return noErr
+        }
+        guard cutStatus == noErr else {
+            NSLog("[NotchShelf] Could not install shared Cut hotkey handler (OSStatus %d)", cutStatus)
+            return
+        }
+
+        let pasteStatus = CarbonHotKeyCenter.shared.setHandler(
+            signature: hotKeySignature,
+            id: HotKeyKind.paste.rawValue
+        ) { [weak self] in
+            guard let self = self else { return OSStatus(eventNotHandledErr) }
+            guard self.shouldCapturePaste?() == true else {
+                self.refreshRegistrations()
+                return OSStatus(eventNotHandledErr)
+            }
+            self.onPaste?()
+            return noErr
+        }
+        guard pasteStatus == noErr else {
+            CarbonHotKeyCenter.shared.removeHandler(
+                signature: hotKeySignature,
+                id: HotKeyKind.cut.rawValue
+            )
+            NSLog("[NotchShelf] Could not install shared Paste hotkey handler (OSStatus %d)", pasteStatus)
+            return
+        }
+
+        started = true
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -83,22 +159,28 @@ final class ShortcutMonitor {
         }
 
         refreshRegistrations()
-        NSLog("[NotchShelf] Hotkey monitor started — no Accessibility or Input Monitoring permission required")
+        NSLog("[NotchShelf] Hotkey monitor started with shared Carbon router")
     }
 
     func stop() {
         unregisterCut()
         unregisterPaste()
 
-        if let activationObserver {
+        CarbonHotKeyCenter.shared.removeHandler(
+            signature: hotKeySignature,
+            id: HotKeyKind.cut.rawValue
+        )
+        CarbonHotKeyCenter.shared.removeHandler(
+            signature: hotKeySignature,
+            id: HotKeyKind.paste.rawValue
+        )
+
+        if let activationObserver = activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
         }
 
-        if let eventHandler {
-            RemoveEventHandler(eventHandler)
-            self.eventHandler = nil
-        }
+        started = false
     }
 
     /// Re-evaluates which shortcuts NotchShelf should own right now.
@@ -140,7 +222,7 @@ final class ShortcutMonitor {
         )
 
         guard status == noErr else {
-            NSLog("[NotchShelf] Could not register Cmd+X (OSStatus \(status))")
+            NSLog("[NotchShelf] Could not register Cmd+X (OSStatus %d)", status)
             return
         }
 
@@ -163,7 +245,7 @@ final class ShortcutMonitor {
         )
 
         guard status == noErr else {
-            NSLog("[NotchShelf] Could not register Cmd+V (OSStatus \(status))")
+            NSLog("[NotchShelf] Could not register Cmd+V (OSStatus %d)", status)
             return
         }
 
@@ -172,37 +254,14 @@ final class ShortcutMonitor {
     }
 
     private func unregisterCut() {
-        guard let cutHotKey else { return }
+        guard let cutHotKey = cutHotKey else { return }
         UnregisterEventHotKey(cutHotKey)
         self.cutHotKey = nil
     }
 
     private func unregisterPaste() {
-        guard let pasteHotKey else { return }
+        guard let pasteHotKey = pasteHotKey else { return }
         UnregisterEventHotKey(pasteHotKey)
         self.pasteHotKey = nil
-    }
-
-    private func handle(_ hotKeyID: EventHotKeyID) -> OSStatus {
-        guard hotKeyID.signature == hotKeySignature else {
-            return OSStatus(eventNotHandledErr)
-        }
-
-        switch hotKeyID.id {
-        case HotKeyKind.cut.rawValue:
-            onCut?()
-            return noErr
-
-        case HotKeyKind.paste.rawValue:
-            guard shouldCapturePaste?() == true else {
-                refreshRegistrations()
-                return OSStatus(eventNotHandledErr)
-            }
-            onPaste?()
-            return noErr
-
-        default:
-            return OSStatus(eventNotHandledErr)
-        }
     }
 }
