@@ -124,6 +124,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openPocketbook.target = self
         menu.addItem(openPocketbook)
 
+        let pocketbookSettings = NSMenuItem(
+            title: "Pocketbook Settings…",
+            action: #selector(openPocketbookSettings),
+            keyEquivalent: ""
+        )
+        pocketbookSettings.target = self
+        menu.addItem(pocketbookSettings)
+
         let shortcutItem = NSMenuItem(
             title: "Shortcut: \(pocketbook.shortcutDescription)…",
             action: #selector(configurePocketbookShortcut),
@@ -312,7 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if let previousCustomPath = previousCustomPath {
-            defaults.set(previousCustomPath, forKey: Self.customOpenerPathDefaultsKey)
+            defaults.set(previousCustomPath, forKey: Self.customOpenerDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.customOpenerPathDefaultsKey)
         }
@@ -324,6 +332,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openPocketbookAction() {
         pocketbook.toggle()
+    }
+
+    @objc private func openPocketbookSettings() {
+        pocketbook.showSettings()
     }
 
     @objc private func configurePocketbookShortcut() {
