@@ -142,11 +142,13 @@ final class PocketbookFeatureV3 {
     private var handler: EventHandlerRef?
     private var panel: PocketbookV3Panel?
     private var keyMonitor: Any?
+    private var requestedVisible = false
+    private var pendingPresentation: DispatchWorkItem?
     private var pendingDismissal: DispatchWorkItem?
 
     var onShortcutChanged: (() -> Void)?
     var shortcutDescription: String { return shortcut.displayString }
-    var isVisible: Bool { return panel?.isVisible == true }
+    var isVisible: Bool { return requestedVisible && panel?.isVisible == true }
 
     init() {
         let defaults = UserDefaults.standard
@@ -221,11 +223,15 @@ final class PocketbookFeatureV3 {
     }
 
     func stop() {
+        requestedVisible = false
+        pendingPresentation?.cancel()
+        pendingPresentation = nil
         pendingDismissal?.cancel()
         pendingDismissal = nil
         removeKeyMonitor()
         panel?.makeFirstResponder(nil)
         panel?.orderOut(nil)
+        model.presented = false
 
         if let hotKey = hotKey { UnregisterEventHotKey(hotKey) }
         if let handler = handler { RemoveEventHandler(handler) }
@@ -244,6 +250,10 @@ final class PocketbookFeatureV3 {
     }
 
     func show() {
+        if isVisible {
+            panel?.makeKeyAndOrderFront(nil)
+            return
+        }
         guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
             NSSound.beep()
@@ -252,7 +262,8 @@ final class PocketbookFeatureV3 {
 
         pendingDismissal?.cancel()
         pendingDismissal = nil
-        model.presented = false
+        pendingPresentation?.cancel()
+        requestedVisible = true
         model.reset()
 
         let metrics = PocketbookV3Metrics(geometry: geometry, screen: screen)
@@ -282,34 +293,41 @@ final class PocketbookFeatureV3 {
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.displayIfNeeded()
 
-        DispatchQueue.main.async { [weak self] in
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
-                self?.model.presented = true
-            }
+        let presentation = DispatchWorkItem { [weak self, weak panel] in
+            guard let self = self, self.requestedVisible,
+                  self.panel === panel else { return }
+            self.model.presented = true
+            self.pendingPresentation = nil
         }
+        pendingPresentation = presentation
+        DispatchQueue.main.async(execute: presentation)
     }
 
     func hide() {
-        guard let panel = panel, panel.isVisible else { return }
+        guard requestedVisible, let panel = panel, panel.isVisible else { return }
 
+        requestedVisible = false
+        pendingPresentation?.cancel()
+        pendingPresentation = nil
         removeKeyMonitor()
         // End editing before the closing surface hides the search field.
         panel.makeFirstResponder(nil)
         panel.resignKey()
         pendingDismissal?.cancel()
 
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.90)) {
-            model.presented = false
-        }
+        model.presented = false
 
         let dismissal = DispatchWorkItem { [weak self, weak panel] in
             guard let self = self, self.panel === panel,
-                  !self.model.presented else { return }
+                  !self.requestedVisible else { return }
             panel?.orderOut(nil)
             self.pendingDismissal = nil
         }
         pendingDismissal = dismissal
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40, execute: dismissal)
+        let delay = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? PocketbookV3Motion.reducedDuration
+            : PocketbookV3Motion.closeDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dismissal)
     }
 
     func showShortcutRecorder() {
@@ -387,9 +405,7 @@ final class PocketbookFeatureV3 {
 
             if event.keyCode == UInt16(kVK_Escape) {
                 if self.model.selectedID != nil {
-                    withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
-                        self.model.selectedID = nil
-                    }
+                    self.model.selectedID = nil
                 } else {
                     self.hide()
                 }
@@ -397,9 +413,7 @@ final class PocketbookFeatureV3 {
             }
 
             if event.keyCode == UInt16(kVK_Return), self.model.selectedID == nil {
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
-                    self.model.selectedID = self.model.results.first?.id
-                }
+                self.model.selectedID = self.model.results.first?.id
                 return nil
             }
 
@@ -423,19 +437,42 @@ final class PocketbookFeatureV3 {
     }
 }
 
+private enum PocketbookV3Motion {
+    // Overlapping geometry phases: shoulders 0–120 ms, bridge 80–280 ms.
+    static let shoulderDuration: TimeInterval = 0.12
+    static let bridgeDelay: TimeInterval = 0.08
+    static let bridgeDuration: TimeInterval = 0.20
+    static let contentDelay: TimeInterval = 0.16
+    static let contentDuration: TimeInterval = 0.12
+    static let closeContentDuration: TimeInterval = 0.10
+    static let closeBridgeDelay: TimeInterval = 0.04
+    static let closeBridgeDuration: TimeInterval = 0.18
+    static let closeShoulderDelay: TimeInterval = 0.12
+    static let closeDuration: TimeInterval = 0.26
+    static let reducedDuration: TimeInterval = 0.12
+
+    static func reveal(_ duration: TimeInterval) -> Animation {
+        return .timingCurve(0.23, 1, 0.32, 1, duration: duration)
+    }
+}
+
 private struct PocketbookV3Metrics {
     let wingWidth: CGFloat
     let homeDepth: CGFloat
     let detailDepth: CGFloat
     let maxDepth: CGFloat
+    let contentWidth: CGFloat
     let windowSize: CGSize
 
     init(geometry: NotchGeometry, screen: NSScreen) {
         let availableHalfWidth = max(100, (screen.frame.width - geometry.hardwareWidth - 48) / 2)
         wingWidth = min(126, availableHalfWidth - NotchGeometry.topRadius)
-        homeDepth = 210
+        homeDepth = 228
         detailDepth = 286
         maxDepth = 294
+        // Content belongs inside the straight body edges, excluding the
+        // shoulder flare and transparent window envelope.
+        contentWidth = geometry.hardwareWidth + 2 * wingWidth
 
         windowSize = CGSize(
             width: geometry.hardwareWidth
@@ -499,6 +536,11 @@ private struct PocketbookV3View: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @Namespace private var tabSelection
+    @State private var shoulderExpansion: CGFloat = 0
+    @State private var bridgeExpansion: CGFloat = 0
+    @State private var contentVisible = false
+    @State private var pendingMotion: [DispatchWorkItem] = []
+    @State private var pendingFocus: DispatchWorkItem?
 
     private var activeDepth: CGFloat {
         return model.selectedID == nil ? metrics.homeDepth : metrics.detailDepth
@@ -507,8 +549,8 @@ private struct PocketbookV3View: View {
     private var activeSurface: PocketbookV3Wings {
         return PocketbookV3Wings(
             geometry: geometry,
-            expansion: model.presented ? 1 : 0,
-            extraDepth: model.presented ? activeDepth : 0,
+            expansion: shoulderExpansion,
+            extraDepth: bridgeExpansion * activeDepth,
             wingWidth: metrics.wingWidth,
             maximumDepth: metrics.maxDepth
         )
@@ -521,25 +563,26 @@ private struct PocketbookV3View: View {
                 .overlay {
                     PocketbookV3OuterEdge(
                         geometry: geometry,
-                        expansion: model.presented ? 1 : 0,
-                        extraDepth: model.presented ? activeDepth : 0,
+                        expansion: shoulderExpansion,
+                        extraDepth: bridgeExpansion * activeDepth,
                         wingWidth: metrics.wingWidth,
                         maximumDepth: metrics.maxDepth
                     )
                     .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
                 }
                 .shadow(
-                    color: model.presented ? Color.black.opacity(0.34) : .clear,
+                    color: Color.black.opacity(0.34 * Double(bridgeExpansion)),
                     radius: 14,
                     y: 5
                 )
 
             content
+                .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
                 .mask(activeSurface)
-                .opacity(model.presented ? 1 : 0)
-                .offset(y: model.presented ? 0 : -5)
-                .allowsHitTesting(model.presented)
-                .accessibilityHidden(!model.presented)
+                .opacity(contentVisible ? 1 : 0)
+                .offset(y: reduceMotion || contentVisible ? 0 : -5)
+                .allowsHitTesting(model.presented && contentVisible)
+                .accessibilityHidden(!model.presented || !contentVisible)
         }
         .frame(
             width: metrics.windowSize.width,
@@ -547,33 +590,112 @@ private struct PocketbookV3View: View {
             alignment: .top
         )
         .clipped()
+        .opacity(reduceMotion && !model.presented ? 0 : 1)
         .animation(
-            reduceMotion ? nil : .spring(response: 0.40, dampingFraction: 0.84),
+            reduceMotion ? .easeOut(duration: PocketbookV3Motion.reducedDuration) : nil,
             value: model.presented
         )
         .animation(
-            reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86),
+            reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.90),
             value: activeDepth
         )
-        .onChange(of: model.presented) { visible in
-            guard visible else {
+        .onChange(of: model.presented) { _, visible in
+            animatePresentation(visible)
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            animatePresentation(model.presented)
+        }
+        .onChange(of: model.selectedID) { _, selectedID in
+            searchFocused = false
+            if selectedID == nil { focusSearchWhenReady() }
+            else { pendingFocus?.cancel() }
+        }
+        .onChange(of: contentVisible) { _, visible in
+            if visible { focusSearchWhenReady() }
+            else {
+                pendingFocus?.cancel()
                 searchFocused = false
-                return
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0.03 : 0.18)) {
-                guard model.presented, model.selectedID == nil else { return }
-                searchFocused = true
             }
         }
-        .onChange(of: model.selectedID) { selectedID in
-            if selectedID == nil, model.presented {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                    guard model.presented, model.selectedID == nil else { return }
-                    searchFocused = true
+        .onDisappear {
+            cancelMotion()
+            pendingFocus?.cancel()
+        }
+    }
+
+    private func cancelMotion() {
+        pendingMotion.forEach { $0.cancel() }
+        pendingMotion.removeAll()
+    }
+
+    private func focusSearchWhenReady() {
+        pendingFocus?.cancel()
+        let focus = DispatchWorkItem {
+            guard model.presented, contentVisible, model.selectedID == nil else { return }
+            searchFocused = true
+        }
+        pendingFocus = focus
+        // Let the newly mounted Home field acquire its AppKit field editor.
+        DispatchQueue.main.async(execute: focus)
+    }
+
+    private func scheduleMotion(after delay: TimeInterval, opening: Bool, action: @escaping () -> Void) {
+        let work = DispatchWorkItem {
+            guard model.presented == opening else { return }
+            action()
+        }
+        pendingMotion.append(work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func animatePresentation(_ opening: Bool) {
+        cancelMotion()
+        if !opening {
+            pendingFocus?.cancel()
+            searchFocused = false
+        }
+
+        if reduceMotion {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                // Keep geometry stationary; the complete surface crossfades.
+                shoulderExpansion = 1
+                bridgeExpansion = 1
+            }
+            withAnimation(.easeOut(duration: PocketbookV3Motion.reducedDuration)) {
+                contentVisible = opening
+            }
+            return
+        }
+
+        if opening {
+            withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.shoulderDuration)) {
+                shoulderExpansion = 1
+            }
+            scheduleMotion(after: PocketbookV3Motion.bridgeDelay, opening: true) {
+                withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.bridgeDuration)) {
+                    bridgeExpansion = 1
                 }
-            } else {
-                searchFocused = false
+            }
+            scheduleMotion(after: PocketbookV3Motion.contentDelay, opening: true) {
+                withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.contentDuration)) {
+                    contentVisible = true
+                }
+            }
+        } else {
+            withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.closeContentDuration)) {
+                contentVisible = false
+            }
+            scheduleMotion(after: PocketbookV3Motion.closeBridgeDelay, opening: false) {
+                withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.closeBridgeDuration)) {
+                    bridgeExpansion = 0
+                }
+            }
+            scheduleMotion(after: PocketbookV3Motion.closeShoulderDelay, opening: false) {
+                withAnimation(PocketbookV3Motion.reveal(PocketbookV3Motion.shoulderDuration)) {
+                    shoulderExpansion = 0
+                }
             }
         }
     }
@@ -593,7 +715,7 @@ private struct PocketbookV3View: View {
         .padding(.top, geometry.hardwareHeight + 8)
         .padding(.bottom, 10)
         .frame(
-            width: metrics.windowSize.width,
+            width: metrics.contentWidth,
             height: geometry.hardwareHeight + activeDepth,
             alignment: .top
         )
@@ -669,7 +791,7 @@ private struct PocketbookV3View: View {
         HStack(spacing: 2) {
             ForEach(PocketbookV3Kind.allCases) { kind in
                 Button {
-                    withAnimation(.spring(response: 0.27, dampingFraction: 0.88)) {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.27, dampingFraction: 0.88)) {
                         model.kind = kind
                     }
                 } label: {
@@ -722,7 +844,7 @@ private struct PocketbookV3View: View {
 
     private func resultRow(_ entry: PocketbookV3Entry) -> some View {
         Button {
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.87)) {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.90)) {
                 model.selectedID = entry.id
             }
         } label: {
@@ -768,7 +890,7 @@ private struct PocketbookV3View: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.88)) {
                         model.selectedID = nil
                     }
                 } label: {
@@ -801,7 +923,7 @@ private struct PocketbookV3View: View {
 
             HStack {
                 Button {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.80)) {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.90)) {
                         model.copy(entry)
                     }
                 } label: {
@@ -836,7 +958,7 @@ private struct PocketbookV3View: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .transition(.opacity.combined(with: .offset(x: reduceMotion ? 0 : 6)))
     }
 
     private func referenceBody(_ entry: PocketbookV3Entry) -> some View {
