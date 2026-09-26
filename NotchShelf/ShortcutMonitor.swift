@@ -76,10 +76,41 @@ final class CarbonHotKeyCenter {
     }
 
     private func dispatch(_ hotKeyID: EventHotKeyID) -> OSStatus {
+        let signature = signatureString(hotKeyID.signature)
+        NSLog(
+            "[NotchShelf] Hotkey fired: %@ id=%u",
+            signature,
+            hotKeyID.id
+        )
+
         guard let callback = callbacks[key(signature: hotKeyID.signature, id: hotKeyID.id)] else {
+            NSLog(
+                "[NotchShelf] No callback for hotkey %@ id=%u",
+                signature,
+                hotKeyID.id
+            )
             return OSStatus(eventNotHandledErr)
         }
-        return callback()
+
+        let status = callback()
+        NSLog(
+            "[NotchShelf] Hotkey handled: %@ id=%u status=%d",
+            signature,
+            hotKeyID.id,
+            status
+        )
+        return status
+    }
+
+    private func signatureString(_ signature: OSType) -> String {
+        let bytes: [UInt8] = [
+            UInt8((signature >> 24) & 0xFF),
+            UInt8((signature >> 16) & 0xFF),
+            UInt8((signature >> 8) & 0xFF),
+            UInt8(signature & 0xFF),
+        ]
+        return String(bytes: bytes, encoding: .ascii)
+            ?? String(format: "0x%08X", signature)
     }
 
     private func key(signature: OSType, id: UInt32) -> UInt64 {
