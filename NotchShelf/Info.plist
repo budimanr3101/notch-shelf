@@ -23,7 +23,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>NotchShelf reads your Finder selection and current folder so Cmd+X and Cmd+V can move files through the notch shelf.</string>
+    <string>NotchShelf uses Apple Events to read Finder selections for the file shelf and to reveal and position your iTerm2 notch terminal.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>
