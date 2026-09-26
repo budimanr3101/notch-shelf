@@ -8,6 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let coordinator = ShelfCoordinator()
     private let pocketbook = PocketbookFeatureV3()
+    private lazy var terminal = ITermNotchTerminalFeature(
+        workingDirectoryProvider: { [weak self] in
+            return self?.coordinator.recentProjectURL
+        }
+    )
 
     private var statusItem: NSStatusItem?
     private var shelfStatusItem: NSMenuItem?
@@ -16,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var openRecentItem: NSMenuItem?
     private var clearProjectItem: NSMenuItem?
     private var pocketbookShortcutItem: NSMenuItem?
+    private var terminalShortcutItem: NSMenuItem?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -36,15 +42,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pocketbook.onShortcutChanged = { [weak self] in
             self?.updatePocketbookUI()
         }
+        terminal.onShortcutChanged = { [weak self] in
+            self?.updateTerminalUI()
+        }
 
         coordinator.start()
         pocketbook.start()
+        terminal.start()
         updateProjectStatus(url: coordinator.recentProjectURL)
         updateDropOpenerUI()
         updatePocketbookUI()
+        updateTerminalUI()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        terminal.stop()
         pocketbook.stop()
         coordinator.stop()
     }
@@ -143,6 +155,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let terminalHeader = NSMenuItem(title: "iTerm Notch Terminal", action: nil, keyEquivalent: "")
+        terminalHeader.isEnabled = false
+        menu.addItem(terminalHeader)
+
+        let openTerminal = NSMenuItem(
+            title: "Open iTerm Notch",
+            action: #selector(openTerminalAction),
+            keyEquivalent: ""
+        )
+        openTerminal.target = self
+        menu.addItem(openTerminal)
+
+        let terminalSettings = NSMenuItem(
+            title: "Terminal Settings…",
+            action: #selector(openTerminalSettings),
+            keyEquivalent: ""
+        )
+        terminalSettings.target = self
+        menu.addItem(terminalSettings)
+
+        let terminalShortcut = NSMenuItem(
+            title: "Shortcut: \(terminal.shortcutDescription)…",
+            action: #selector(configureTerminalShortcut),
+            keyEquivalent: ""
+        )
+        terminalShortcut.target = self
+        menu.addItem(terminalShortcut)
+        terminalShortcutItem = terminalShortcut
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(
             title: "Quit NotchShelf",
             action: #selector(NSApplication.terminate(_:)),
@@ -157,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateProjectStatus(url: nil)
         updateDropOpenerUI()
         updatePocketbookUI()
+        updateTerminalUI()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -164,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateProjectStatus(url: coordinator.recentProjectURL)
         updateDropOpenerUI()
         updatePocketbookUI()
+        updateTerminalUI()
     }
 
     private func updateShelfStatus(count: Int) {
@@ -246,6 +291,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pocketbookShortcutItem?.title = "Shortcut: \(pocketbook.shortcutDescription)…"
     }
 
+    private func updateTerminalUI() {
+        terminalShortcutItem?.title = "Shortcut: \(terminal.shortcutDescription)…"
+    }
+
     @objc private func clearShelf() {
         coordinator.clearShelf()
     }
@@ -320,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if let previousCustomPath = previousCustomPath {
-            defaults.set(previousCustomPath, forKey: Self.customOpenerPathDefaultsKey)
+            defaults.set(previousCustomPath, forKey: Self.customOpenerDefaultsKey)
         } else {
             defaults.removeObject(forKey: Self.customOpenerPathDefaultsKey)
         }
@@ -341,5 +390,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func configurePocketbookShortcut() {
         pocketbook.showShortcutRecorder()
         updatePocketbookUI()
+    }
+
+    @objc private func openTerminalAction() {
+        terminal.toggle()
+    }
+
+    @objc private func openTerminalSettings() {
+        terminal.showSettings()
+    }
+
+    @objc private func configureTerminalShortcut() {
+        terminal.showShortcutRecorder()
+        updateTerminalUI()
     }
 }
