@@ -551,12 +551,20 @@ private final class NotchTerminalShell {
         let output = Pipe()
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        process.arguments = ["-q", "/dev/null", "/bin/zsh", "-l"]
+        process.arguments = [
+            "-q",
+            "/dev/null",
+            "/bin/sh",
+            "-lc",
+            "stty rows 30 cols 100; exec /bin/zsh -l"
+        ]
         process.currentDirectoryURL = directory
 
         var environment = ProcessInfo.processInfo.environment
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
+        environment["LINES"] = "30"
+        environment["COLUMNS"] = "100"
         environment["LC_CTYPE"] = environment["LC_CTYPE"] ?? "UTF-8"
         process.environment = environment
 
