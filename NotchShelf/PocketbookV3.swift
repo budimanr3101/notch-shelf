@@ -142,7 +142,7 @@ final class PocketbookFeatureV3 {
     private var handler: EventHandlerRef?
     private var panel: PocketbookV3Panel?
     private var keyMonitor: Any?
-    private var previousApp: NSRunningApplication?
+    private var pendingDismissal: DispatchWorkItem?
 
     var onShortcutChanged: (() -> Void)?
     var shortcutDescription: String { return shortcut.displayString }
@@ -221,7 +221,10 @@ final class PocketbookFeatureV3 {
     }
 
     func stop() {
+        pendingDismissal?.cancel()
+        pendingDismissal = nil
         removeKeyMonitor()
+        panel?.makeFirstResponder(nil)
         panel?.orderOut(nil)
 
         if let hotKey = hotKey { UnregisterEventHotKey(hotKey) }
@@ -247,9 +250,10 @@ final class PocketbookFeatureV3 {
             return
         }
 
-        previousApp = NSWorkspace.shared.frontmostApplication
-        model.reset()
+        pendingDismissal?.cancel()
+        pendingDismissal = nil
         model.presented = false
+        model.reset()
 
         let metrics = PocketbookV3Metrics(geometry: geometry, screen: screen)
         let frame = NSRect(
@@ -259,21 +263,24 @@ final class PocketbookFeatureV3 {
             height: metrics.windowSize.height
         )
 
-        panel?.orderOut(nil)
-        let newPanel = PocketbookV3Panel(
-            frame: frame,
-            model: model,
-            geometry: geometry,
-            metrics: metrics,
-            onClose: { [weak self] in self?.hide() }
-        )
-        panel = newPanel
+        // Retain the hosting view and field editor across open/close cycles.
+        if panel?.frame != frame {
+            panel?.makeFirstResponder(nil)
+            panel?.orderOut(nil)
+            panel = PocketbookV3Panel(
+                frame: frame,
+                model: model,
+                geometry: geometry,
+                metrics: metrics,
+                onClose: { [weak self] in self?.hide() }
+            )
+        }
+        guard let panel = panel else { return }
         installKeyMonitor()
 
-        NSApp.activate(ignoringOtherApps: true)
-        newPanel.makeKeyAndOrderFront(nil)
-        newPanel.contentView?.layoutSubtreeIfNeeded()
-        newPanel.displayIfNeeded()
+        panel.makeKeyAndOrderFront(nil)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.displayIfNeeded()
 
         DispatchQueue.main.async { [weak self] in
             withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
@@ -286,23 +293,23 @@ final class PocketbookFeatureV3 {
         guard let panel = panel, panel.isVisible else { return }
 
         removeKeyMonitor()
-        let restore = previousApp
-        previousApp = nil
+        // End editing before the closing surface hides the search field.
+        panel.makeFirstResponder(nil)
+        panel.resignKey()
+        pendingDismissal?.cancel()
 
         withAnimation(.spring(response: 0.34, dampingFraction: 0.90)) {
             model.presented = false
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) { [weak self, weak panel] in
+        let dismissal = DispatchWorkItem { [weak self, weak panel] in
+            guard let self = self, self.panel === panel,
+                  !self.model.presented else { return }
             panel?.orderOut(nil)
-            guard self?.panel === panel else { return }
-            self?.panel = nil
-
-            if let restore = restore,
-               restore.bundleIdentifier != Bundle.main.bundleIdentifier {
-                restore.activate(options: [.activateIgnoringOtherApps])
-            }
+            self.pendingDismissal = nil
         }
+        pendingDismissal = dismissal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40, execute: dismissal)
     }
 
     func showShortcutRecorder() {
@@ -453,7 +460,7 @@ private final class PocketbookV3Panel: NSPanel {
     ) {
         super.init(
             contentRect: frame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -527,11 +534,12 @@ private struct PocketbookV3View: View {
                     y: 5
                 )
 
-            if model.presented {
-                content
-                    .mask(activeSurface)
-                    .transition(.opacity.combined(with: .offset(y: -5)))
-            }
+            content
+                .mask(activeSurface)
+                .opacity(model.presented ? 1 : 0)
+                .offset(y: model.presented ? 0 : -5)
+                .allowsHitTesting(model.presented)
+                .accessibilityHidden(!model.presented)
         }
         .frame(
             width: metrics.windowSize.width,
