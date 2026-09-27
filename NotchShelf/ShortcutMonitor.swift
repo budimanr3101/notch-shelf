@@ -48,7 +48,9 @@ private enum NotchTerminalZshEnvironment {
                 encoding: .utf8
             )
 
-            setenv("ZDOTDIR", bridge.path, 1)
+            bridge.path.withCString { path in
+                _ = setenv("ZDOTDIR", path, 1)
+            }
             NSLog(
                 "[NotchShelf] Embedded zsh startup: interactive config only (.zshenv + .zshrc)"
             )
