@@ -20,20 +20,25 @@ struct NotchShelfApp: App {
 
 // MARK: - Background terminal activity
 
-private struct NotchTerminalForegroundProcess: Equatable {
-    let pid: Int32
-    let command: String
-}
-
 private enum NotchTerminalActivityKind: Equatable {
     case running
     case finished
+    case failed
 }
 
 private struct NotchTerminalActivityPresentation: Equatable {
     let kind: NotchTerminalActivityKind
     let command: String
     let startedAt: Date
+    var exitCode: Int32? = nil
+
+    var statusLabel: String {
+        switch kind {
+        case .running: return "Terminal running"
+        case .finished: return exitCode == 130 ? "Stopped" : "Finished"
+        case .failed: return "Failed · exit \(exitCode ?? 1)"
+        }
+    }
 }
 
 private enum NotchTerminalActivityAnimation {
@@ -74,172 +79,68 @@ private enum NotchTerminalActivityAnimation {
 }
 
 @MainActor
-private final class NotchTerminalActivityController: ObservableObject {
+final class NotchTerminalActivityController: ObservableObject {
     static let shared = NotchTerminalActivityController()
 
-    @Published private(set) var presentation: NotchTerminalActivityPresentation?
+    @Published fileprivate var presentation: NotchTerminalActivityPresentation?
 
     private static let panelIdentifier = NSUserInterfaceItemIdentifier("NotchTerminalActivityPanel")
-    private static let minimumVisibleRuntime: TimeInterval = 0.65
     private static let finishedDisplayDuration: TimeInterval = 2.2
 
     private var timer: Timer?
     private var panel: NotchTerminalActivityPanel?
-    private var activeProcess: NotchTerminalForegroundProcess?
+    private var commandID: String?
+    private var currentCommand = ""
+    private var completedAt: Date?
     private var activeStartedAt: Date?
-    private var completionWork: DispatchWorkItem?
-    private var polling = false
     private var started = false
-    private var lastDiagnosticState = ""
-
+    var isRunning: Bool { commandID != nil }
     private init() {}
 
     func start() {
         guard !started else { return }
         started = true
-
-        timer = Timer.scheduledTimer(withTimeInterval: 0.30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.poll()
-            }
-        }
-        timer?.tolerance = 0.05
-
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stop()
-            }
-        }
-
-        poll()
-        NSLog("[NotchShelf] Background terminal activity monitor ready (zsh-child detector)")
-    }
-
-    private func stop() {
-        timer?.invalidate()
-        timer = nil
-        completionWork?.cancel()
-        completionWork = nil
-        panel?.orderOut(nil)
-        panel = nil
-        presentation = nil
-        activeProcess = nil
-        activeStartedAt = nil
-        started = false
-    }
-
-    private func poll() {
-        guard !polling else { return }
-        polling = true
-        let rootPID = ProcessInfo.processInfo.processIdentifier
-
-        Task.detached(priority: .utility) {
-            let snapshot = Self.detectTerminalState(rootPID: rootPID)
-            await MainActor.run { [weak self] in
-                guard let self = self else { return }
-                self.polling = false
-                self.reportDiagnostic(snapshot.diagnostic)
-                self.apply(snapshot.process)
-            }
+        // Only visibility is sampled. Command lifecycle comes from shell markers.
+        timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshVisibility() }
         }
     }
 
-    private func reportDiagnostic(_ value: String) {
-        guard value != lastDiagnosticState else { return }
-        lastDiagnosticState = value
-        NSLog("[NotchShelf] Terminal activity scan: %@", value)
+    func begin(id: String, command: String) {
+        let now = Date()
+        commandID = id
+        currentCommand = command
+        activeStartedAt = now
+        completedAt = nil
+        presentation = NotchTerminalActivityPresentation(kind: .running, command: command, startedAt: now)
+        NSLog("[NotchShelf] command started: %@", command)
+        refreshVisibility()
     }
 
-    private func apply(_ foreground: NotchTerminalForegroundProcess?) {
-        let terminalExpanded = isTerminalExpanded
-        let anotherNotchSurfaceVisible = isAnotherNotchSurfaceVisible
+    func finish(id: String, status: Int32) {
+        guard commandID == id else { return }
+        commandID = nil
+        completedAt = Date()
+        presentation = NotchTerminalActivityPresentation(kind: status == 0 || status == 130 ? .finished : .failed,
+            command: currentCommand, startedAt: activeStartedAt ?? Date(), exitCode: status)
+        NSLog("[NotchShelf] command finished: exit=%d", status)
+        refreshVisibility()
+    }
 
-        if let foreground = foreground {
-            completionWork?.cancel()
-            completionWork = nil
+    func finishSession(status: Int32) {
+        if let id = commandID { finish(id: id, status: status) }
+    }
 
-            if activeProcess?.pid != foreground.pid || activeProcess?.command != foreground.command {
-                activeProcess = foreground
-                activeStartedAt = Date()
-                NSLog(
-                    "[NotchShelf] Terminal activity detected pid=%d: %@",
-                    foreground.pid,
-                    foreground.command
-                )
-            }
-
-            guard let startedAt = activeStartedAt else { return }
-
-            if terminalExpanded || anotherNotchSurfaceVisible {
-                hidePanel()
-                return
-            }
-
-            let runtime = Date().timeIntervalSince(startedAt)
-            guard runtime >= Self.minimumVisibleRuntime else {
-                hidePanel()
-                return
-            }
-
-            presentation = NotchTerminalActivityPresentation(
-                kind: .running,
-                command: prettyCommand(foreground.command),
-                startedAt: startedAt
-            )
-            showPanel()
-            return
-        }
-
-        if let previous = activeProcess,
-           let startedAt = activeStartedAt {
-            let runtime = Date().timeIntervalSince(startedAt)
-            activeProcess = nil
-            activeStartedAt = nil
-
-            guard runtime >= Self.minimumVisibleRuntime else {
-                presentation = nil
-                hidePanel()
-                return
-            }
-
-            if terminalExpanded || anotherNotchSurfaceVisible {
-                presentation = nil
-                hidePanel()
-                return
-            }
-
-            presentation = NotchTerminalActivityPresentation(
-                kind: .finished,
-                command: prettyCommand(previous.command),
-                startedAt: startedAt
-            )
-            showPanel()
-
-            completionWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self = self,
-                      self.activeProcess == nil,
-                      self.presentation?.kind == .finished else { return }
-                self.presentation = nil
-                self.hidePanel()
-                self.completionWork = nil
-            }
-            completionWork = work
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + Self.finishedDisplayDuration,
-                execute: work
-            )
-            return
-        }
-
-        if presentation?.kind != .finished {
+    private func refreshVisibility() {
+        if let completed = completedAt, Date().timeIntervalSince(completed) >= Self.finishedDisplayDuration {
             presentation = nil
-            hidePanel()
+            completedAt = nil
         }
+        guard presentation != nil, !isTerminalExpanded, !isAnotherNotchSurfaceVisible else {
+            hidePanel(); return
+        }
+        if panel?.isVisible != true { NSLog("[NotchShelf] background activity visible") }
+        showPanel()
     }
 
     private var isTerminalExpanded: Bool {
@@ -324,174 +225,6 @@ private final class NotchTerminalActivityController: ObservableObject {
         return value
     }
 
-    private struct ProcessEntry {
-        let pid: Int32
-        let ppid: Int32
-        let command: String
-    }
-
-    private struct TerminalScanSnapshot {
-        let process: NotchTerminalForegroundProcess?
-        let diagnostic: String
-    }
-
-    private nonisolated static func detectTerminalState(rootPID: Int32) -> TerminalScanSnapshot {
-        guard let entries = processEntries(), !entries.isEmpty else {
-            return TerminalScanSnapshot(process: nil, diagnostic: "ps unavailable")
-        }
-
-        let rootDescendants = descendants(of: rootPID, entries: entries)
-        let shellEntries = entries.filter {
-            rootDescendants.contains($0.pid) && executableName($0.command) == "zsh"
-        }
-
-        guard !shellEntries.isEmpty else {
-            let wrapperNames = entries
-                .filter { rootDescendants.contains($0.pid) }
-                .map { executableName($0.command) }
-                .filter { $0 == "script" || $0 == "sh" }
-            let hint = wrapperNames.isEmpty ? "none" : wrapperNames.joined(separator: ",")
-            return TerminalScanSnapshot(
-                process: nil,
-                diagnostic: "no zsh child; wrappers=\(hint)"
-            )
-        }
-
-        for shell in shellEntries.sorted(by: { $0.pid > $1.pid }) {
-            let shellDescendants = descendants(of: shell.pid, entries: entries)
-            let candidates = entries.filter {
-                shellDescendants.contains($0.pid) && !isIgnoredProcess($0.command)
-            }
-
-            if let direct = candidates
-                .filter({ $0.ppid == shell.pid })
-                .max(by: { $0.pid < $1.pid }) {
-                return TerminalScanSnapshot(
-                    process: NotchTerminalForegroundProcess(pid: direct.pid, command: direct.command),
-                    diagnostic: "running \(executableName(direct.command)) pid=\(direct.pid)"
-                )
-            }
-
-            if let deepest = candidates.max(by: { lhs, rhs in
-                processDepth(lhs.pid, root: shell.pid, entries: entries)
-                    < processDepth(rhs.pid, root: shell.pid, entries: entries)
-            }) {
-                return TerminalScanSnapshot(
-                    process: NotchTerminalForegroundProcess(pid: deepest.pid, command: deepest.command),
-                    diagnostic: "running \(executableName(deepest.command)) pid=\(deepest.pid)"
-                )
-            }
-        }
-
-        return TerminalScanSnapshot(
-            process: nil,
-            diagnostic: "zsh idle; shells=\(shellEntries.count)"
-        )
-    }
-
-    private nonisolated static func processEntries() -> [ProcessEntry]? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,ppid=,command="]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: data, as: UTF8.self)
-
-        return output.split(separator: "\n").compactMap { line in
-            let parts = line.split(maxSplits: 2, whereSeparator: { $0.isWhitespace })
-            guard parts.count == 3,
-                  let pid = Int32(parts[0]),
-                  let ppid = Int32(parts[1]) else {
-                return nil
-            }
-            return ProcessEntry(
-                pid: pid,
-                ppid: ppid,
-                command: String(parts[2])
-            )
-        }
-    }
-
-    private nonisolated static func descendants(
-        of root: Int32,
-        entries: [ProcessEntry]
-    ) -> Set<Int32> {
-        var result: Set<Int32> = []
-        var frontier: [Int32] = [root]
-
-        while let parent = frontier.popLast() {
-            for entry in entries where entry.ppid == parent && !result.contains(entry.pid) {
-                result.insert(entry.pid)
-                frontier.append(entry.pid)
-            }
-        }
-
-        return result
-    }
-
-    private nonisolated static func processDepth(
-        _ pid: Int32,
-        root: Int32,
-        entries: [ProcessEntry]
-    ) -> Int {
-        var parentByPID: [Int32: Int32] = [:]
-        for entry in entries {
-            parentByPID[entry.pid] = entry.ppid
-        }
-
-        var depth = 0
-        var cursor = pid
-        var visited: Set<Int32> = []
-
-        while cursor != root,
-              let parent = parentByPID[cursor],
-              !visited.contains(cursor) {
-            visited.insert(cursor)
-            depth += 1
-            cursor = parent
-            if depth > 32 { break }
-        }
-        return depth
-    }
-
-    private nonisolated static func executableName(_ command: String) -> String {
-        let first = command
-            .split(whereSeparator: { $0.isWhitespace })
-            .first
-            .map(String.init) ?? ""
-
-        return URL(fileURLWithPath: first)
-            .lastPathComponent
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-            .lowercased()
-    }
-
-    private nonisolated static func isIgnoredProcess(_ command: String) -> Bool {
-        let executable = executableName(command)
-        if ["zsh", "sh", "script", "stty", "ps"].contains(executable) {
-            return true
-        }
-
-        let lower = command.lowercased()
-        let helperFragments = [
-            "kiro-cli-autocomplete",
-            "starship",
-            "powerlevel10k",
-            "p10k",
-            "gitstatusd"
-        ]
-        return helperFragments.contains(where: { lower.contains($0) })
-    }
 }
 
 private struct NotchTerminalActivityMetrics {
@@ -562,6 +295,7 @@ private struct NotchTerminalActivityView: View {
     let metrics: NotchTerminalActivityMetrics
     let onOpen: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
 
     private var surface: PocketbookV3Wings {
@@ -575,36 +309,39 @@ private struct NotchTerminalActivityView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            surface
-                .fill(Color.black)
-                .overlay {
-                    PocketbookV3OuterEdge(
-                        geometry: geometry,
-                        expansion: 1,
-                        extraDepth: metrics.depth,
-                        wingWidth: metrics.wingWidth,
-                        maximumDepth: metrics.depth
-                    )
-                    .stroke(Color.white.opacity(hovering ? 0.17 : 0.105), lineWidth: 0.75)
-                }
-                .shadow(color: Color.black.opacity(0.34), radius: 11, y: 4)
+        Button(action: onOpen) {
+            ZStack(alignment: .top) {
+                surface
+                    .fill(Color.black)
+                    .overlay {
+                        PocketbookV3OuterEdge(
+                            geometry: geometry,
+                            expansion: 1,
+                            extraDepth: metrics.depth,
+                            wingWidth: metrics.wingWidth,
+                            maximumDepth: metrics.depth
+                        )
+                        .stroke(Color.white.opacity(hovering ? 0.17 : 0.105), lineWidth: 0.75)
+                    }
+                    .shadow(color: Color.black.opacity(0.34), radius: 11, y: 4)
 
-            if let presentation = controller.presentation {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                    activityContent(presentation: presentation, now: context.date)
+                if let presentation = controller.presentation {
+                    TimelineView(.animation(minimumInterval: reduceMotion ? 1 : 1.0 / 30.0)) { context in
+                        activityContent(presentation: presentation, now: context.date)
+                    }
+                    .transition(.opacity)
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
+            .contentShape(Rectangle())
+            .onHover { value in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    hovering = value
+                }
             }
         }
-        .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
-        .contentShape(Rectangle())
-        .onHover { value in
-            withAnimation(.easeOut(duration: 0.12)) {
-                hovering = value
-            }
-        }
-        .onTapGesture(perform: onOpen)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Notch Terminal")
     }
 
     private func activityContent(
@@ -633,7 +370,7 @@ private struct NotchTerminalActivityView: View {
                             .fill(Color.green)
                             .frame(width: 5, height: 5)
 
-                        Text(presentation.kind == .running ? "Terminal running" : "Finished")
+                        Text(presentation.statusLabel)
                             .font(.system(size: 8.7, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.white.opacity(0.43))
                     }
@@ -656,9 +393,9 @@ private struct NotchTerminalActivityView: View {
                     .foregroundStyle(Color.white.opacity(0.56))
                     .frame(minWidth: 38, alignment: .trailing)
             } else {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: presentation.kind == .failed ? "xmark.circle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(presentation.kind == .failed ? Color.red.opacity(0.8) : Color.green)
                     .frame(minWidth: 38, alignment: .trailing)
             }
         }
@@ -677,7 +414,12 @@ private struct NotchTerminalActivityView: View {
         presentation: NotchTerminalActivityPresentation,
         now: Date
     ) -> some View {
-        if presentation.kind == .finished {
+        if presentation.kind == .failed {
+            Image(systemName: "xmark").foregroundStyle(Color.red.opacity(0.75))
+        } else if reduceMotion {
+            Image(systemName: presentation.kind == .running ? "terminal" : "checkmark")
+                .foregroundStyle(Color.white.opacity(0.65))
+        } else if presentation.kind != .running {
             finishedAnimation(now: now)
         } else {
             switch NotchTerminalActivityAnimation.style(for: presentation.command) {

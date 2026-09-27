@@ -463,71 +463,145 @@ struct NotchTerminalShortcut: Equatable {
     }
 }
 
+// Streaming line renderer: control sequences may span PTY reads.
 private final class NotchTerminalSanitizer {
-    private enum State {
-        case normal
-        case escape
-        case csi
-        case osc
-        case oscEscape
-    }
-
-    private var state: State = .normal
+    var onCompletion: ((String, Int32) -> Void)?
+    private var state = 0
+    private var sequence = ""
+    private var lines: [[NSAttributedString]] = [[]]
+    private var column = 0
+    private var foreground = NSColor.white.withAlphaComponent(0.86)
+    private var bold = false
+    private var dim = false
+    private var underline = false
 
     func reset() {
-        state = .normal
+        state = 0; sequence = ""; lines = [[]]; column = 0
+        foreground = NSColor.white.withAlphaComponent(0.86)
+        bold = false; dim = false; underline = false
     }
 
-    func consume(_ value: String) -> String {
-        var output = ""
+    func clearScreen() {
+        lines = [[]]
+        column = 0
+    }
 
+    var rendered: NSAttributedString {
+        let result = NSMutableAttributedString(string: "")
+        for (index, line) in lines.enumerated() {
+            if index > 0 { result.append(NSAttributedString(string: "\n")) }
+            for cell in line { result.append(cell) }
+        }
+        return result
+    }
+
+    func consume(_ value: String) {
         for scalar in value.unicodeScalars {
             switch state {
-            case .normal:
+            case 1:
+                sequence = ""
+                state = scalar.value == 91 ? 2 : (scalar.value == 93 ? 3 : 0)
+            case 2:
+                if (64...126).contains(scalar.value) {
+                    csi(String(scalar)); state = 0
+                } else { sequence.unicodeScalars.append(scalar) }
+            case 3:
+                if scalar.value == 7 { osc(); state = 0 }
+                else if scalar.value == 27 { state = 4 }
+                else { sequence.unicodeScalars.append(scalar) }
+            case 4:
+                if scalar.value == 92 { osc(); state = 0 } else { state = 3 }
+            default:
                 switch scalar.value {
-                case 0x1B:
-                    state = .escape
-                case 0x08:
-                    if !output.isEmpty, output.last != "\n" {
-                        output.removeLast()
-                    }
-                case 0x0A:
-                    output.unicodeScalars.append(scalar)
-                case 0x09:
-                    output.unicodeScalars.append(scalar)
-                case 0x0D, 0x00...0x07, 0x0B...0x1A, 0x1C...0x1F, 0x7F:
-                    continue
-                default:
-                    output.unicodeScalars.append(scalar)
+                case 27: state = 1
+                case 13: column = 0
+                case 8: column = max(0, column - 1)
+                case 10:
+                    lines.append([]); column = 0
+                    if lines.count > 2000 { lines.removeFirst(lines.count - 2000) }
+                case 9:
+                    for _ in 0..<(8 - column % 8) { write(" ") }
+                case 0...31, 127: break
+                default: write(String(scalar))
                 }
-
-            case .escape:
-                if scalar.value == 0x5B {
-                    state = .csi
-                } else if scalar.value == 0x5D {
-                    state = .osc
-                } else {
-                    state = .normal
-                }
-
-            case .csi:
-                if scalar.value >= 0x40 && scalar.value <= 0x7E {
-                    state = .normal
-                }
-
-            case .osc:
-                if scalar.value == 0x07 {
-                    state = .normal
-                } else if scalar.value == 0x1B {
-                    state = .oscEscape
-                }
-
-            case .oscEscape:
-                state = scalar.value == 0x5C ? .normal : .osc
             }
         }
+    }
 
-        return output
+    private func write(_ text: String) {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: dim ? foreground.withAlphaComponent(0.5) : foreground,
+            .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: bold ? .bold : .regular)
+        ]
+        if underline { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+        let cell = NSAttributedString(string: text, attributes: attributes)
+        let row = lines.count - 1
+        while lines[row].count < column { lines[row].append(NSAttributedString(string: " ")) }
+        if column < lines[row].count { lines[row][column] = cell } else { lines[row].append(cell) }
+        column += 1
+    }
+
+    private func osc() {
+        let pieces = sequence.split(separator: ";")
+        if pieces.count == 4, pieces[0] == "777", pieces[1] == "notchshelf",
+           let status = Int32(pieces[3]) { onCompletion?(String(pieces[2]), status) }
+    }
+
+    private func csi(_ final: String) {
+        let values = sequence.split(separator: ";", omittingEmptySubsequences: false).map { Int($0) ?? 0 }
+        let first = values.first ?? 0
+        switch final {
+        case "D": column = max(0, column - max(1, first))
+        case "C": column = min(10000, column + max(1, first))
+        case "G": column = max(0, min(10000, first - 1))
+        case "J":
+            if first == 2 || first == 3 { lines = [[]]; column = 0 }
+        case "K":
+            let row = lines.count - 1
+            if first == 2 { lines[row] = [] }
+            else if first == 1 {
+                for index in 0..<min(column + 1, lines[row].count) { lines[row][index] = NSAttributedString(string: " ") }
+            } else if column < lines[row].count { lines[row].removeSubrange(column...) }
+        case "m":
+            var i = 0
+            while i < values.count {
+                let v = values[i]
+                switch v {
+                case 0: foreground = NSColor.white.withAlphaComponent(0.86); bold = false; dim = false; underline = false
+                case 1: bold = true
+                case 2: dim = true
+                case 4: underline = true
+                case 22: bold = false; dim = false
+                case 24: underline = false
+                case 39: foreground = NSColor.white.withAlphaComponent(0.86)
+                case 30...37: foreground = color(v - 30)
+                case 90...97: foreground = color(v - 90 + 8)
+                case 38:
+                    if i + 2 < values.count, values[i + 1] == 5 { foreground = color(values[i + 2]); i += 2 }
+                    else if i + 4 < values.count, values[i + 1] == 2 {
+                        foreground = NSColor(srgbRed: CGFloat(max(0, min(255, values[i + 2]))) / 255,
+                            green: CGFloat(max(0, min(255, values[i + 3]))) / 255,
+                            blue: CGFloat(max(0, min(255, values[i + 4]))) / 255, alpha: 1); i += 4
+                    }
+                default: break
+                }
+                i += 1
+            }
+        default: break
+        }
+    }
+
+    private func color(_ index: Int) -> NSColor {
+        let palette: [UInt32] = [0x202020,0xcd3131,0x0dbc79,0xe5e510,0x2472c8,0xbc3fbc,0x11a8cd,0xe5e5e5,
+            0x666666,0xf14c4c,0x23d18b,0xf5f543,0x3b8eea,0xd670d6,0x29b8db,0xffffff]
+        let rgb: UInt32
+        if index < 16 { rgb = palette[max(0, index)] }
+        else if index < 232 {
+            let n = index - 16; let levels: [UInt32] = [0,95,135,175,215,255]
+            rgb = levels[n / 36] << 16 | levels[n / 6 % 6] << 8 | levels[n % 6]
+        } else { let level = UInt32(min(255, 8 + max(0, index - 232) * 10)); rgb = level << 16 | level << 8 | level }
+        return NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
+            blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 }
 
@@ -538,6 +612,7 @@ private final class NotchTerminalShell {
     private var process: Process?
     private var inputPipe: Pipe?
     private var outputPipe: Pipe?
+    private var configurationDirectory: URL?
 
     var isRunning: Bool {
         return process?.isRunning == true
@@ -556,7 +631,7 @@ private final class NotchTerminalShell {
             "/dev/null",
             "/bin/sh",
             "-lc",
-            "stty rows 30 cols 100; exec /bin/zsh -l"
+            "stty rows 30 cols 100 -echo; exec /bin/zsh -l"
         ]
         process.currentDirectoryURL = directory
 
@@ -566,21 +641,53 @@ private final class NotchTerminalShell {
         environment["LINES"] = "30"
         environment["COLUMNS"] = "100"
         environment["LC_CTYPE"] = environment["LC_CTYPE"] ?? "UTF-8"
+        // Source the user's startup files, then install our hook before the first read.
+        // A per-session ZDOTDIR keeps the user's configuration untouched.
+        let original = environment["ZDOTDIR"] ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let configuration = FileManager.default.temporaryDirectory.appendingPathComponent("notchshelf-zsh-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: configuration, withIntermediateDirectories: true)
+        configurationDirectory = configuration
+        func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\"'\"'") + "'" }
+        for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
+            let source = URL(fileURLWithPath: original).appendingPathComponent(file).path
+            var contents = "[[ -f " + quote(source) + " ]] && source " + quote(source) + "\n"
+            contents += "export ZDOTDIR=" + quote(configuration.path) + "\n"
+            if file == ".zlogin" {
+                contents += """
+                unsetopt zle
+                stty rows 30 cols 100 -echo
+                autoload -Uz add-zsh-hook
+                function _notchshelf_done() {
+                    local result=$?
+                    if [[ -n ${_notchshelf_id-} ]]; then
+                        printf '\\e]777;notchshelf;%s;%s\\a' "$_notchshelf_id" "$result"
+                        unset _notchshelf_id
+                    fi
+                    return $result
+                }
+                add-zsh-hook precmd _notchshelf_done
+                """
+            }
+            try contents.write(to: configuration.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        }
+        environment["ZDOTDIR"] = configuration.path
         process.environment = environment
 
         process.standardInput = input
         process.standardOutput = output
         process.standardError = output
 
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let outputCallback = onOutput
+        let exitCallback = onExit
+        output.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            self?.onOutput?(String(decoding: data, as: UTF8.self))
+            outputCallback?(String(decoding: data, as: UTF8.self))
         }
 
-        process.terminationHandler = { [weak self] process in
+        process.terminationHandler = { process in
             output.fileHandleForReading.readabilityHandler = nil
-            self?.onExit?(process.terminationStatus)
+            exitCallback?(process.terminationStatus)
         }
 
         try process.run()
@@ -611,12 +718,15 @@ private final class NotchTerminalShell {
         process = nil
         inputPipe = nil
         outputPipe = nil
+        if let directory = configurationDirectory { try? FileManager.default.removeItem(at: directory) }
+        configurationDirectory = nil
     }
 }
 
 @MainActor
 final class NotchTerminalModel: ObservableObject {
     @Published var transcript = ""
+    @Published var styledTranscript = AttributedString("")
     @Published var command = ""
     @Published var sessionAlive = false
     @Published var presented = false
@@ -625,22 +735,30 @@ final class NotchTerminalModel: ObservableObject {
     private let shell = NotchTerminalShell()
     private let sanitizer = NotchTerminalSanitizer()
     private let workingDirectoryProvider: () -> URL?
+    private var sessionID = UUID()
     private var history: [String] = []
     private var historyIndex: Int?
-    private let maximumTranscriptCharacters = 100_000
 
     init(workingDirectoryProvider: @escaping () -> URL?) {
         self.workingDirectoryProvider = workingDirectoryProvider
+        sanitizer.onCompletion = { id, status in
+            NotchTerminalActivityController.shared.finish(id: id, status: status)
+        }
 
+    }
+
+    private func connectSession(id: UUID) {
         shell.onOutput = { [weak self] value in
             DispatchQueue.main.async {
-                self?.appendOutput(value)
+                guard let self = self, self.sessionID == id else { return }
+                self.appendOutput(value)
             }
         }
         shell.onExit = { [weak self] status in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, self.sessionID == id else { return }
                 self.sessionAlive = false
+                NotchTerminalActivityController.shared.finishSession(status: status)
                 self.appendPlain("\n[session ended: \(status)]\n")
             }
         }
@@ -652,6 +770,8 @@ final class NotchTerminalModel: ObservableObject {
             return
         }
 
+        sessionID = UUID()
+        connectSession(id: sessionID)
         let directory = initialDirectory()
         directoryLabel = displayDirectory(directory)
         sanitizer.reset()
@@ -670,12 +790,15 @@ final class NotchTerminalModel: ObservableObject {
         shell.stop()
         sanitizer.reset()
         transcript = ""
+        styledTranscript = AttributedString("")
+        NotchTerminalActivityController.shared.finishSession(status: 130)
         sessionAlive = false
         historyIndex = nil
         ensureSession()
     }
 
     func stop() {
+        sessionID = UUID()
         shell.stop()
         sessionAlive = false
     }
@@ -691,14 +814,18 @@ final class NotchTerminalModel: ObservableObject {
         historyIndex = nil
         command = ""
 
-        if value == "clear" {
-            clear()
+        if NotchTerminalActivityController.shared.isRunning {
             shell.sendLine(value)
             return
         }
-
         ensureSession()
-        shell.sendLine(value)
+        guard sessionAlive else { return }
+        let id = UUID().uuidString
+        NotchTerminalActivityController.shared.begin(id: id, command: value)
+        // Single-quote shell data, never interpolate command text as shell syntax.
+        let quoted = "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+        appendPlain("\n› " + value + "\n")
+        shell.sendLine("_notchshelf_id='" + id + "'; eval -- " + quoted + "; _notchshelf_done")
     }
 
     func interrupt() {
@@ -706,7 +833,9 @@ final class NotchTerminalModel: ObservableObject {
     }
 
     func clear() {
+        sanitizer.clearScreen()
         transcript = ""
+        styledTranscript = AttributedString("")
     }
 
     func historyPrevious() {
@@ -734,16 +863,19 @@ final class NotchTerminalModel: ObservableObject {
     }
 
     private func appendOutput(_ raw: String) {
-        let clean = sanitizer.consume(raw)
-        guard !clean.isEmpty else { return }
-        appendPlain(clean)
+        sanitizer.consume(raw)
+        publishTranscript()
     }
 
     private func appendPlain(_ value: String) {
-        transcript.append(value)
-        if transcript.count > maximumTranscriptCharacters {
-            transcript = String(transcript.suffix(maximumTranscriptCharacters))
-        }
+        sanitizer.consume(value)
+        publishTranscript()
+    }
+
+    private func publishTranscript() {
+        let rendered = sanitizer.rendered
+        transcript = rendered.string
+        styledTranscript = AttributedString(rendered)
     }
 
     private func initialDirectory() -> URL {
@@ -824,6 +956,11 @@ final class NotchTerminalFeature {
             )
         } else {
             shortcut = .defaultShortcut
+        }
+        // Migrate the previous shipped default; keep other custom shortcuts.
+        if shortcut.keyCode == UInt32(kVK_ANSI_T), shortcut.modifiers == UInt32(shiftKey | cmdKey) {
+            shortcut = .defaultShortcut
+            defaults.set(Int(shortcut.modifiers), forKey: Self.modifiersKey)
         }
     }
 
@@ -1217,8 +1354,7 @@ private struct NotchTerminalView: View {
                         Text("Starting zsh…")
                             .foregroundStyle(Color.white.opacity(0.42))
                     } else {
-                        Text(model.transcript)
-                            .foregroundStyle(Color.white.opacity(0.86))
+                        Text(model.styledTranscript)
                             .textSelection(.enabled)
                     }
                     Color.clear
