@@ -319,6 +319,7 @@ private final class NotchLauncherModel: ObservableObject {
     @Published var selectedIndex = 0
     @Published var applications: [NotchLauncherApplication] = []
     @Published var presented = false
+    @Published var launchingApplication: NotchLauncherApplication?
 
     private static let recentKey = "NotchShelf.Launcher.recentApplications"
     private var loaded = false
@@ -372,6 +373,7 @@ private final class NotchLauncherModel: ObservableObject {
     }
 
     func moveSelection(_ delta: Int) {
+        guard launchingApplication == nil else { return }
         let count = results.count
         guard count > 0 else {
             selectedIndex = 0
@@ -508,6 +510,7 @@ private final class NotchAppLauncher {
     private var panel: NotchLauncherPanel?
     private var keyMonitor: Any?
     private var pendingDismissal: DispatchWorkItem?
+    private var pendingLaunch: DispatchWorkItem?
     private var started = false
     private var requestedVisible = false
 
@@ -558,10 +561,13 @@ private final class NotchAppLauncher {
 
     func stop() {
         requestedVisible = false
+        pendingLaunch?.cancel()
+        pendingLaunch = nil
         pendingDismissal?.cancel()
         pendingDismissal = nil
         removeKeyMonitor()
         model.presented = false
+        model.launchingApplication = nil
         panel?.orderOut(nil)
         panel = nil
 
@@ -574,6 +580,7 @@ private final class NotchAppLauncher {
     }
 
     private func toggle() {
+        guard model.launchingApplication == nil else { return }
         if isVisible { hide() }
         else { show() }
     }
@@ -588,6 +595,9 @@ private final class NotchAppLauncher {
         model.loadApplicationsIfNeeded()
         model.query = ""
         model.selectedIndex = 0
+        model.launchingApplication = nil
+        pendingLaunch?.cancel()
+        pendingLaunch = nil
         pendingDismissal?.cancel()
         pendingDismissal = nil
         requestedVisible = true
@@ -640,6 +650,7 @@ private final class NotchAppLauncher {
                   !self.requestedVisible,
                   self.panel === panel else { return }
             panel?.orderOut(nil)
+            self.model.launchingApplication = nil
             self.pendingDismissal = nil
         }
         pendingDismissal = work
@@ -648,18 +659,39 @@ private final class NotchAppLauncher {
     }
 
     private func launch(_ app: NotchLauncherApplication) {
+        guard model.launchingApplication == nil else { return }
+
         model.recordLaunch(app)
-        let opened = NSWorkspace.shared.open(app.url)
-        NSLog(
-            opened
-                ? "[NotchShelf] Launcher opened %@"
-                : "[NotchShelf] Launcher failed to open %@",
-            app.name
-        )
-        hide()
+        model.launchingApplication = app
+        removeKeyMonitor()
+        panel?.ignoresMouseEvents = true
+        NSLog("[NotchShelf] Launcher absorbing %@ into notch", app.name)
+
+        pendingLaunch?.cancel()
+        let delay: TimeInterval = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? 0.08
+            : 0.36
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.model.launchingApplication?.id == app.id else { return }
+
+            let opened = NSWorkspace.shared.open(app.url)
+            NSLog(
+                opened
+                    ? "[NotchShelf] Launcher opened %@ after absorb"
+                    : "[NotchShelf] Launcher failed to open %@ after absorb",
+                app.name
+            )
+            self.pendingLaunch = nil
+            self.hide()
+        }
+        pendingLaunch = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func launchSelected() {
+        guard model.launchingApplication == nil else { return }
         guard let app = model.selectedApplication else {
             NSSound.beep()
             return
@@ -671,6 +703,7 @@ private final class NotchAppLauncher {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.isVisible else { return event }
+            guard self.model.launchingApplication == nil else { return nil }
 
             switch Int(event.keyCode) {
             case kVK_Escape:
@@ -750,6 +783,17 @@ private final class NotchLauncherPanel: NSPanel {
     }
 }
 
+private struct NotchLauncherSelectedRowFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero {
+            value = next
+        }
+    }
+}
+
 private struct NotchLauncherView: View {
     @ObservedObject var model: NotchLauncherModel
     let geometry: NotchGeometry
@@ -762,6 +806,9 @@ private struct NotchLauncherView: View {
     @State private var shoulderExpansion: CGFloat = 0
     @State private var bridgeExpansion: CGFloat = 0
     @State private var contentVisible = false
+    @State private var selectedRowFrame: CGRect = .zero
+    @State private var absorbProgress: CGFloat = 0
+    @State private var notchPulse: CGFloat = 0
     @State private var pendingMotion: [DispatchWorkItem] = []
 
     private var surface: PocketbookV3Wings {
@@ -786,7 +833,10 @@ private struct NotchLauncherView: View {
                         wingWidth: metrics.wingWidth,
                         maximumDepth: metrics.maxDepth
                     )
-                    .stroke(Color.white.opacity(0.11), lineWidth: 0.75)
+                    .stroke(
+                        Color.white.opacity(0.11 + 0.17 * Double(notchPulse)),
+                        lineWidth: 0.75 + 0.45 * notchPulse
+                    )
                 }
                 .shadow(
                     color: Color.black.opacity(0.38 * Double(bridgeExpansion)),
@@ -801,18 +851,41 @@ private struct NotchLauncherView: View {
                     alignment: .top
                 )
                 .mask(surface)
-                .opacity(contentVisible ? 1 : 0)
+                .opacity(contentOpacity)
+                .blur(radius: model.launchingApplication == nil ? 0 : 0.7)
                 .offset(y: reduceMotion || contentVisible ? 0 : -6)
-                .allowsHitTesting(model.presented && contentVisible)
+                .allowsHitTesting(
+                    model.presented
+                        && contentVisible
+                        && model.launchingApplication == nil
+                )
+
+            if let app = model.launchingApplication {
+                absorbOverlay(app)
+            }
         }
+        .coordinateSpace(name: "NotchLauncherSpace")
         .frame(
             width: metrics.windowSize.width,
             height: metrics.windowSize.height,
             alignment: .top
         )
         .clipped()
+        .onPreferenceChange(NotchLauncherSelectedRowFrameKey.self) { frame in
+            if frame != .zero {
+                selectedRowFrame = frame
+            }
+        }
         .onChange(of: model.presented) { visible in
             animatePresentation(visible)
+        }
+        .onChange(of: model.launchingApplication) { app in
+            if app != nil {
+                animateAbsorb()
+            } else {
+                absorbProgress = 0
+                notchPulse = 0
+            }
         }
         .onChange(of: contentVisible) { visible in
             if visible {
@@ -826,6 +899,11 @@ private struct NotchLauncherView: View {
         .onDisappear {
             cancelMotion()
         }
+    }
+
+    private var contentOpacity: Double {
+        guard contentVisible else { return 0 }
+        return model.launchingApplication == nil ? 1 : 0.42
     }
 
     private var content: some View {
@@ -855,6 +933,7 @@ private struct NotchLauncherView: View {
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.96))
                 .focused($searchFocused)
+                .disabled(model.launchingApplication != nil)
 
             if !model.query.isEmpty {
                 Button {
@@ -865,6 +944,7 @@ private struct NotchLauncherView: View {
                         .foregroundStyle(Color.white.opacity(0.28))
                 }
                 .buttonStyle(.plain)
+                .disabled(model.launchingApplication != nil)
             }
 
             Text("⌥Space")
@@ -944,7 +1024,10 @@ private struct NotchLauncherView: View {
 
     private func resultRow(_ app: NotchLauncherApplication, index: Int) -> some View {
         let selected = index == model.selectedIndex
+        let launchingThisApp = model.launchingApplication?.id == app.id
+
         return Button {
+            guard model.launchingApplication == nil else { return }
             model.selectedIndex = index
             onLaunch(app)
         } label: {
@@ -953,6 +1036,8 @@ private struct NotchLauncherView: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 34, height: 34)
+                    .opacity(launchingThisApp ? 0.05 : 1)
+                    .scaleEffect(launchingThisApp ? 0.78 : 1)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(app.name)
@@ -969,7 +1054,7 @@ private struct NotchLauncherView: View {
 
                 Spacer(minLength: 8)
 
-                if selected {
+                if selected && model.launchingApplication == nil {
                     HStack(spacing: 5) {
                         Text("Open")
                         Text("↵")
@@ -990,9 +1075,20 @@ private struct NotchLauncherView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.7)
                 }
             }
+            .background {
+                if selected {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: NotchLauncherSelectedRowFrameKey.self,
+                            value: proxy.frame(in: .named("NotchLauncherSpace"))
+                        )
+                    }
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.12), value: launchingThisApp)
     }
 
     private var footer: some View {
@@ -1008,6 +1104,77 @@ private struct NotchLauncherView: View {
         .font(.system(size: 8.5, weight: .medium, design: .rounded))
         .foregroundStyle(Color.white.opacity(0.34))
         .frame(height: 12)
+    }
+
+    @ViewBuilder
+    private func absorbOverlay(_ app: NotchLauncherApplication) -> some View {
+        let fallbackX = metrics.windowSize.width / 2
+        let fallbackY = geometry.hardwareHeight + metrics.depth * 0.48
+        let startX = selectedRowFrame == .zero
+            ? fallbackX
+            : selectedRowFrame.minX + 28
+        let startY = selectedRowFrame == .zero
+            ? fallbackY
+            : selectedRowFrame.midY
+        let targetX = metrics.windowSize.width / 2
+        let targetY = max(6, geometry.hardwareHeight - 2)
+        let progress = min(max(absorbProgress, 0), 1)
+        let arc = sin(progress * .pi) * 10
+        let x = startX + (targetX - startX) * progress + arc
+        let y = startY + (targetY - startY) * progress
+        let scale = max(0.12, 1 - 0.88 * progress)
+
+        ZStack {
+            Circle()
+                .stroke(
+                    Color.white.opacity(0.24 * Double(notchPulse)),
+                    lineWidth: 1
+                )
+                .frame(
+                    width: 24 + 26 * notchPulse,
+                    height: 24 + 26 * notchPulse
+                )
+                .position(x: targetX, y: targetY + 2)
+                .blur(radius: 0.3)
+
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 38, height: 38)
+                .scaleEffect(scale)
+                .rotationEffect(.degrees(-5 * Double(progress)))
+                .opacity(max(0, 1 - 0.86 * Double(progress)))
+                .shadow(
+                    color: Color.white.opacity(0.13 * Double(1 - progress)),
+                    radius: 9
+                )
+                .position(x: x, y: y)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func animateAbsorb() {
+        absorbProgress = 0
+        notchPulse = 0
+        searchFocused = false
+
+        if reduceMotion {
+            absorbProgress = 1
+            notchPulse = 0.35
+            return
+        }
+
+        withAnimation(.timingCurve(0.18, 0.82, 0.22, 1, duration: 0.32)) {
+            absorbProgress = 1
+        }
+        withAnimation(.easeOut(duration: 0.10)) {
+            notchPulse = 1
+        }
+        schedule(after: 0.12) {
+            withAnimation(.easeInOut(duration: 0.20)) {
+                notchPulse = 0
+            }
+        }
     }
 
     private func animatePresentation(_ visible: Bool) {
