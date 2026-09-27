@@ -44,27 +44,27 @@ private enum NotchTerminalActivityAnimation {
     static func style(for command: String) -> NotchTerminalActivityAnimation {
         let value = command.lowercased()
 
-        if value.contains("ping")
-            || value.contains("curl")
-            || value.contains("wget")
-            || value.contains("ssh")
-            || value.contains("scp")
-            || value.contains("rsync")
+        if value.contains("ping ")
+            || value.contains("curl ")
+            || value.contains("wget ")
+            || value.contains("ssh ")
+            || value.contains("scp ")
+            || value.contains("rsync ")
             || value.contains("kubectl logs")
             || value.contains("kubectl port-forward")
             || value.contains("tail -f") {
             return .packets
         }
 
-        if value.contains("docker")
-            || value.contains("npm")
-            || value.contains("pnpm")
-            || value.contains("yarn")
-            || value.contains("terraform")
-            || value.contains("tofu")
-            || value.contains("brew")
+        if value.contains("docker ")
+            || value.contains("npm ")
+            || value.contains("pnpm ")
+            || value.contains("yarn ")
+            || value.contains("terraform ")
+            || value.contains("tofu ")
+            || value.contains("brew ")
             || value.contains("git clone")
-            || value.contains("make")
+            || value.contains("make ")
             || value.contains("xcodebuild") {
             return .terminalBot
         }
@@ -90,7 +90,7 @@ private final class NotchTerminalActivityController: ObservableObject {
     private var completionWork: DispatchWorkItem?
     private var polling = false
     private var started = false
-    private var lastLoggedProcess: NotchTerminalForegroundProcess?
+    private var lastDiagnosticState = ""
 
     private init() {}
 
@@ -98,12 +98,12 @@ private final class NotchTerminalActivityController: ObservableObject {
         guard !started else { return }
         started = true
 
-        timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.poll()
             }
         }
-        timer?.tolerance = 0.06
+        timer?.tolerance = 0.05
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -116,7 +116,7 @@ private final class NotchTerminalActivityController: ObservableObject {
         }
 
         poll()
-        NSLog("[NotchShelf] Background terminal activity monitor ready")
+        NSLog("[NotchShelf] Background terminal activity monitor ready (zsh-child detector)")
     }
 
     private func stop() {
@@ -129,7 +129,6 @@ private final class NotchTerminalActivityController: ObservableObject {
         presentation = nil
         activeProcess = nil
         activeStartedAt = nil
-        lastLoggedProcess = nil
         started = false
     }
 
@@ -139,25 +138,20 @@ private final class NotchTerminalActivityController: ObservableObject {
         let rootPID = ProcessInfo.processInfo.processIdentifier
 
         Task.detached(priority: .utility) {
-            let foreground = Self.detectForegroundTerminalProcess(rootPID: rootPID)
+            let snapshot = Self.detectTerminalState(rootPID: rootPID)
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.polling = false
-                self.logDetectionChange(foreground)
-                self.apply(foreground)
+                self.reportDiagnostic(snapshot.diagnostic)
+                self.apply(snapshot.process)
             }
         }
     }
 
-    private func logDetectionChange(_ process: NotchTerminalForegroundProcess?) {
-        guard process != lastLoggedProcess else { return }
-        lastLoggedProcess = process
-
-        if let process = process {
-            NSLog("[NotchShelf] Terminal activity detected pid=%d: %@", process.pid, process.command)
-        } else {
-            NSLog("[NotchShelf] Terminal activity idle")
-        }
+    private func reportDiagnostic(_ value: String) {
+        guard value != lastDiagnosticState else { return }
+        lastDiagnosticState = value
+        NSLog("[NotchShelf] Terminal activity scan: %@", value)
     }
 
     private func apply(_ foreground: NotchTerminalForegroundProcess?) {
@@ -171,16 +165,21 @@ private final class NotchTerminalActivityController: ObservableObject {
             if activeProcess?.pid != foreground.pid || activeProcess?.command != foreground.command {
                 activeProcess = foreground
                 activeStartedAt = Date()
+                NSLog(
+                    "[NotchShelf] Terminal activity detected pid=%d: %@",
+                    foreground.pid,
+                    foreground.command
+                )
             }
 
             guard let startedAt = activeStartedAt else { return }
-            let runtime = Date().timeIntervalSince(startedAt)
 
             if terminalExpanded || anotherNotchSurfaceVisible {
                 hidePanel()
                 return
             }
 
+            let runtime = Date().timeIntervalSince(startedAt)
             guard runtime >= Self.minimumVisibleRuntime else {
                 hidePanel()
                 return
@@ -328,64 +327,73 @@ private final class NotchTerminalActivityController: ObservableObject {
     private struct ProcessEntry {
         let pid: Int32
         let ppid: Int32
-        let pgid: Int32
-        let foregroundPGID: Int32
         let command: String
     }
 
-    private nonisolated static func detectForegroundTerminalProcess(
-        rootPID: Int32
-    ) -> NotchTerminalForegroundProcess? {
-        guard let entries = processEntries(), !entries.isEmpty else { return nil }
+    private struct TerminalScanSnapshot {
+        let process: NotchTerminalForegroundProcess?
+        let diagnostic: String
+    }
+
+    private nonisolated static func detectTerminalState(rootPID: Int32) -> TerminalScanSnapshot {
+        guard let entries = processEntries(), !entries.isEmpty else {
+            return TerminalScanSnapshot(process: nil, diagnostic: "ps unavailable")
+        }
 
         let rootDescendants = descendants(of: rootPID, entries: entries)
-        let scripts = entries.filter { entry in
-            rootDescendants.contains(entry.pid) && isScriptProcess(entry.command)
+        let shellEntries = entries.filter {
+            rootDescendants.contains($0.pid) && executableName($0.command) == "zsh"
         }
 
-        for script in scripts.sorted(by: { $0.pid > $1.pid }) {
-            let terminalDescendants = descendants(of: script.pid, entries: entries)
-            let candidates = entries.filter { entry in
-                terminalDescendants.contains(entry.pid)
-                    && !isShellProcess(entry.command)
-                    && !isTerminalHelperProcess(entry.command)
+        guard !shellEntries.isEmpty else {
+            let wrapperNames = entries
+                .filter { rootDescendants.contains($0.pid) }
+                .map { executableName($0.command) }
+                .filter { $0 == "script" || $0 == "sh" }
+            let hint = wrapperNames.isEmpty ? "none" : wrapperNames.joined(separator: ",")
+            return TerminalScanSnapshot(
+                process: nil,
+                diagnostic: "no zsh child; wrappers=\(hint)"
+            )
+        }
+
+        for shell in shellEntries.sorted(by: { $0.pid > $1.pid }) {
+            let shellDescendants = descendants(of: shell.pid, entries: entries)
+            let candidates = entries.filter {
+                shellDescendants.contains($0.pid) && !isIgnoredProcess($0.command)
             }
 
-            guard !candidates.isEmpty else { continue }
-
-            // Prefer the normal foreground process group when macOS exposes it.
-            if let foreground = candidates
-                .filter({ $0.foregroundPGID > 0 && $0.pgid == $0.foregroundPGID })
-                .sorted(by: { $0.pid > $1.pid })
-                .first {
-                return NotchTerminalForegroundProcess(
-                    pid: foreground.pid,
-                    command: foreground.command
+            if let direct = candidates
+                .filter({ $0.ppid == shell.pid })
+                .max(by: { $0.pid < $1.pid }) {
+                return TerminalScanSnapshot(
+                    process: NotchTerminalForegroundProcess(pid: direct.pid, command: direct.command),
+                    diagnostic: "running \(executableName(direct.command)) pid=\(direct.pid)"
                 )
             }
 
-            // `script(1)` can expose a PTY without a usable tpgid when stdin is a Pipe.
-            // In that case the newest non-shell descendant is the command launched by
-            // the interactive zsh session. This keeps ping/sleep/ssh/build jobs visible.
-            if let fallback = candidates.sorted(by: { $0.pid > $1.pid }).first {
-                return NotchTerminalForegroundProcess(
-                    pid: fallback.pid,
-                    command: fallback.command
+            if let deepest = candidates.max(by: { lhs, rhs in
+                processDepth(lhs.pid, root: shell.pid, entries: entries)
+                    < processDepth(rhs.pid, root: shell.pid, entries: entries)
+            }) {
+                return TerminalScanSnapshot(
+                    process: NotchTerminalForegroundProcess(pid: deepest.pid, command: deepest.command),
+                    diagnostic: "running \(executableName(deepest.command)) pid=\(deepest.pid)"
                 )
             }
         }
 
-        return nil
+        return TerminalScanSnapshot(
+            process: nil,
+            diagnostic: "zsh idle; shells=\(shellEntries.count)"
+        )
     }
 
     private nonisolated static func processEntries() -> [ProcessEntry]? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = [
-            "-axo",
-            "pid=,ppid=,pgid=,tpgid=,tty=,etime=,command="
-        ]
+        process.arguments = ["-axo", "pid=,ppid=,command="]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
@@ -400,24 +408,16 @@ private final class NotchTerminalActivityController: ObservableObject {
         let output = String(decoding: data, as: UTF8.self)
 
         return output.split(separator: "\n").compactMap { line in
-            let parts = line.split(
-                maxSplits: 6,
-                whereSeparator: { $0.isWhitespace }
-            )
-            guard parts.count == 7,
+            let parts = line.split(maxSplits: 2, whereSeparator: { $0.isWhitespace })
+            guard parts.count == 3,
                   let pid = Int32(parts[0]),
-                  let ppid = Int32(parts[1]),
-                  let pgid = Int32(parts[2]),
-                  let foregroundPGID = Int32(parts[3]) else {
+                  let ppid = Int32(parts[1]) else {
                 return nil
             }
-
             return ProcessEntry(
                 pid: pid,
                 ppid: ppid,
-                pgid: pgid,
-                foregroundPGID: foregroundPGID,
-                command: String(parts[6])
+                command: String(parts[2])
             )
         }
     }
@@ -439,37 +439,58 @@ private final class NotchTerminalActivityController: ObservableObject {
         return result
     }
 
+    private nonisolated static func processDepth(
+        _ pid: Int32,
+        root: Int32,
+        entries: [ProcessEntry]
+    ) -> Int {
+        var parentByPID: [Int32: Int32] = [:]
+        for entry in entries {
+            parentByPID[entry.pid] = entry.ppid
+        }
+
+        var depth = 0
+        var cursor = pid
+        var visited: Set<Int32> = []
+
+        while cursor != root,
+              let parent = parentByPID[cursor],
+              !visited.contains(cursor) {
+            visited.insert(cursor)
+            depth += 1
+            cursor = parent
+            if depth > 32 { break }
+        }
+        return depth
+    }
+
     private nonisolated static func executableName(_ command: String) -> String {
-        let first = command.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+        let first = command
+            .split(whereSeparator: { $0.isWhitespace })
+            .first
+            .map(String.init) ?? ""
+
         return URL(fileURLWithPath: first)
             .lastPathComponent
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             .lowercased()
     }
 
-    private nonisolated static func isScriptProcess(_ command: String) -> Bool {
+    private nonisolated static func isIgnoredProcess(_ command: String) -> Bool {
         let executable = executableName(command)
-        return executable == "script"
-            || command.contains("/usr/bin/script")
-    }
+        if ["zsh", "sh", "script", "stty", "ps"].contains(executable) {
+            return true
+        }
 
-    private nonisolated static func isShellProcess(_ command: String) -> Bool {
-        let executable = executableName(command)
-        return executable == "zsh"
-            || executable == "sh"
-            || executable == "bash"
-            || executable == "script"
-            || executable == "stty"
-    }
-
-    private nonisolated static func isTerminalHelperProcess(_ command: String) -> Bool {
-        let value = command.lowercased()
-        return value.contains("kiro-cli-autocomplete")
-            || value.contains("starship")
-            || value.contains("zsh-autosuggest")
-            || value.contains("zsh-syntax-highlighting")
-            || value.contains("powerlevel10k")
-            || value.contains("p10k")
+        let lower = command.lowercased()
+        let helperFragments = [
+            "kiro-cli-autocomplete",
+            "starship",
+            "powerlevel10k",
+            "p10k",
+            "gitstatusd"
+        ]
+        return helperFragments.contains(where: { lower.contains($0) })
     }
 }
 
@@ -493,8 +514,8 @@ private struct NotchTerminalActivityMetrics {
 
 @MainActor
 private final class NotchTerminalActivityPanel: NSPanel {
-    override var canBecomeKey: Bool { return false }
-    override var canBecomeMain: Bool { return false }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
     init(
         frame: NSRect,
@@ -571,10 +592,7 @@ private struct NotchTerminalActivityView: View {
 
             if let presentation = controller.presentation {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                    activityContent(
-                        presentation: presentation,
-                        now: context.date
-                    )
+                    activityContent(presentation: presentation, now: context.date)
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
@@ -602,6 +620,7 @@ private struct NotchTerminalActivityView: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .stroke(Color.white.opacity(0.09), lineWidth: 0.6)
                         }
+
                     Image(systemName: "terminal.fill")
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.88))
@@ -613,6 +632,7 @@ private struct NotchTerminalActivityView: View {
                         Circle()
                             .fill(Color.green)
                             .frame(width: 5, height: 5)
+
                         Text(presentation.kind == .running ? "Terminal running" : "Finished")
                             .font(.system(size: 8.7, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.white.opacity(0.43))
@@ -683,16 +703,19 @@ private struct NotchTerminalActivityView: View {
                     .padding(.horizontal, 4)
 
                 ForEach(0..<7, id: \.self) { index in
-                    let raw = (t * 0.55 + Double(index) * 0.13).truncatingRemainder(dividingBy: 1)
+                    let raw = (t * 0.55 + Double(index) * 0.13)
+                        .truncatingRemainder(dividingBy: 1)
                     let phase = raw < 0 ? raw + 1 : raw
                     let emphasis = 1 - abs(0.5 - phase) * 1.45
                     let dotSize = CGFloat(3.5 + max(0, emphasis) * 2.3)
+
                     Circle()
                         .fill(index.isMultiple(of: 2) ? Color.cyan : Color.green)
                         .frame(width: dotSize, height: dotSize)
                         .opacity(0.25 + max(0, emphasis) * 0.75)
                         .shadow(
-                            color: (index.isMultiple(of: 2) ? Color.cyan : Color.green).opacity(0.45),
+                            color: (index.isMultiple(of: 2) ? Color.cyan : Color.green)
+                                .opacity(0.45),
                             radius: CGFloat(max(0, emphasis) * 4)
                         )
                         .offset(x: 4 + CGFloat(phase) * width)
@@ -721,8 +744,10 @@ private struct NotchTerminalActivityView: View {
                         .fill(Color.green.opacity(0.34 - Double(index) * 0.055))
                         .frame(width: 3, height: 3)
                         .offset(
-                            x: max(CGFloat(2), CGFloat(phase) * travel - CGFloat(index * 6)),
-                            y: 0
+                            x: max(
+                                CGFloat(2),
+                                CGFloat(phase) * travel - CGFloat(index * 6)
+                            )
                         )
                 }
 
@@ -739,6 +764,7 @@ private struct NotchTerminalActivityView: View {
             ForEach(0..<11, id: \.self) { index in
                 let t = now.timeIntervalSinceReferenceDate * 4.0
                 let wave = (sin(t + Double(index) * 0.72) + 1) / 2
+
                 Capsule()
                     .fill(Color.accentColor.opacity(0.38 + wave * 0.58))
                     .frame(width: 3.2, height: CGFloat(4 + wave * 16))
@@ -757,10 +783,12 @@ private struct NotchTerminalActivityView: View {
                     .fill(Color.green.opacity(0.18 + Double(index) * 0.18))
                     .frame(width: 4, height: 4)
             }
+
             Image(systemName: "checkmark")
                 .font(.system(size: 11, weight: .heavy))
                 .foregroundStyle(Color.green)
                 .scaleEffect(pulse)
+
             ForEach(0..<3, id: \.self) { index in
                 Circle()
                     .fill(Color.green.opacity(0.54 - Double(index) * 0.14))
@@ -774,10 +802,12 @@ private struct NotchTerminalActivityView: View {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         let minutes = seconds / 60
         let remainder = seconds % 60
+
         if minutes >= 60 {
             let hours = minutes / 60
             return String(format: "%d:%02d:%02d", hours, minutes % 60, remainder)
         }
+
         return String(format: "%02d:%02d", minutes, remainder)
     }
 }
@@ -805,6 +835,7 @@ private struct TerminalBotGlyph: View {
                     .fill(Color.green.opacity(0.75))
                     .frame(width: 3, height: 4)
                     .rotationEffect(.degrees(16))
+
                 Capsule()
                     .fill(Color.green.opacity(0.75))
                     .frame(width: 3, height: 4)
