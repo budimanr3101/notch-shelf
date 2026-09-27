@@ -7,9 +7,35 @@ struct NotchShelfApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+        Self.migrateTerminalShortcutDefaultIfNeeded()
+
         Task { @MainActor in
             NotchTerminalActivityController.shared.start()
         }
+    }
+
+    private static func migrateTerminalShortcutDefaultIfNeeded() {
+        let defaults = UserDefaults.standard
+        let keyCodeKey = "NotchShelf.Terminal.keyCode"
+        let modifiersKey = "NotchShelf.Terminal.modifiers"
+        let labelKey = "NotchShelf.Terminal.keyLabel"
+
+        let hasSavedShortcut = defaults.object(forKey: keyCodeKey) != nil
+            && defaults.object(forKey: modifiersKey) != nil
+        let savedKeyCode = UInt32(defaults.integer(forKey: keyCodeKey))
+        let savedModifiers = UInt32(defaults.integer(forKey: modifiersKey))
+
+        let legacyControlOptionT = savedKeyCode == UInt32(kVK_ANSI_T)
+            && savedModifiers == UInt32(controlKey | optionKey)
+        let legacyShiftCommandT = savedKeyCode == UInt32(kVK_ANSI_T)
+            && savedModifiers == UInt32(shiftKey | cmdKey)
+
+        guard !hasSavedShortcut || legacyControlOptionT || legacyShiftCommandT else { return }
+
+        defaults.set(Int(kVK_ANSI_N), forKey: keyCodeKey)
+        defaults.set(Int(shiftKey | cmdKey), forKey: modifiersKey)
+        defaults.set("N", forKey: labelKey)
+        NSLog("[NotchShelf] Terminal shortcut default migrated to ⇧⌘N")
     }
 
     var body: some Scene {
@@ -130,6 +156,7 @@ final class NotchTerminalActivityController: ObservableObject {
                 self.terminalResignWork = nil
                 self.terminalExpanded = true
                 self.hidePanel()
+                self.scrollTerminalToBottom(window)
             }
         })
         observers.append(center.addObserver(
@@ -224,6 +251,43 @@ final class NotchTerminalActivityController: ObservableObject {
         if status != noErr {
             NSLog("[NotchShelf] Terminal hotkey route failed: %d", status)
         }
+    }
+
+    private func scrollTerminalToBottom(_ window: NSWindow) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self, weak window] in
+            guard let self,
+                  let window,
+                  window.isVisible,
+                  self.isFullTerminalWindow(window) else { return }
+
+            if self.scrollFirstScrollViewToBottom(in: window.contentView) {
+                NSLog("[NotchShelf] Terminal restored at latest output")
+            }
+        }
+    }
+
+    @discardableResult
+    private func scrollFirstScrollViewToBottom(in view: NSView?) -> Bool {
+        guard let view else { return false }
+
+        if let scrollView = view as? NSScrollView,
+           let documentView = scrollView.documentView {
+            documentView.layoutSubtreeIfNeeded()
+            scrollView.layoutSubtreeIfNeeded()
+
+            let clipView = scrollView.contentView
+            let maximumY = max(0, documentView.bounds.height - clipView.bounds.height)
+            clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: maximumY))
+            scrollView.reflectScrolledClipView(clipView)
+            return true
+        }
+
+        for subview in view.subviews.reversed() {
+            if scrollFirstScrollViewToBottom(in: subview) {
+                return true
+            }
+        }
+        return false
     }
 
     private func scheduleTerminalCollapsed() {
