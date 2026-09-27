@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let defaultOpenerDefaultsKey = "NotchShelf.defaultDropOpener"
-    private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
+    private static let customOpenerPathDefaultsKey = "NotchShelf.customOpenerPath"
 
     private let coordinator = ShelfCoordinator()
     private let pocketbook = PocketbookFeatureV3()
@@ -439,7 +439,11 @@ struct NotchTerminalShortcut: Equatable {
         if flags.contains(.option) { modifiers |= UInt32(optionKey) }
         if flags.contains(.control) { modifiers |= UInt32(controlKey) }
         if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
-        guard modifiers != 0 else { return nil }
+
+        // Shift-only global shortcuts steal normal capital-letter typing. Require at
+        // least one non-Shift modifier; Shift is still valid as an extra modifier.
+        let safeGlobalModifiers = UInt32(cmdKey | optionKey | controlKey)
+        guard modifiers & safeGlobalModifiers != 0 else { return nil }
 
         let characters = event.charactersIgnoringModifiers?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -807,17 +811,21 @@ final class NotchTerminalModel: ObservableObject {
         let value = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
 
-        if history.last != value {
-            history.append(value)
-            if history.count > 200 { history.removeFirst(history.count - 200) }
-        }
         historyIndex = nil
         command = ""
 
+        // Input entered while a command is already running may be a password or an
+        // interactive prompt response. Send it to the PTY, but never persist it in history.
         if NotchTerminalActivityController.shared.isRunning {
             shell.sendLine(value)
             return
         }
+
+        if history.last != value {
+            history.append(value)
+            if history.count > 200 { history.removeFirst(history.count - 200) }
+        }
+
         ensureSession()
         guard sessionAlive else { return }
         let id = UUID().uuidString
@@ -957,11 +965,6 @@ final class NotchTerminalFeature {
         } else {
             shortcut = .defaultShortcut
         }
-        // Migrate the previous shipped default; keep other custom shortcuts.
-        if shortcut.keyCode == UInt32(kVK_ANSI_T), shortcut.modifiers == UInt32(shiftKey | cmdKey) {
-            shortcut = .defaultShortcut
-            defaults.set(Int(shortcut.modifiers), forKey: Self.modifiersKey)
-        }
     }
 
     func start() {
@@ -1085,7 +1088,7 @@ final class NotchTerminalFeature {
     func showShortcutRecorder() {
         let alert = NSAlert()
         alert.messageText = "Notch Terminal Shortcut"
-        alert.informativeText = "Press a global shortcut using ⌘, ⌥, ⌃, or ⇧."
+        alert.informativeText = "Press a global shortcut using ⌘, ⌥, or ⌃. Shift may be added."
         let recorder = NotchTerminalShortcutCaptureView(current: shortcut)
         alert.accessoryView = recorder
         alert.addButton(withTitle: "Save")
@@ -1522,7 +1525,7 @@ private final class NotchTerminalShortcutCaptureView: NSView {
         guard let value = NotchTerminalShortcut(event: event),
               !value.conflictsWithFileShelf else {
             NSSound.beep()
-            hint.stringValue = "Use modifier + key. Cmd+X / Cmd+V are reserved."
+            hint.stringValue = "Use ⌘, ⌥, or ⌃ + key. Cmd+X / Cmd+V are reserved."
             return
         }
         captured = value
