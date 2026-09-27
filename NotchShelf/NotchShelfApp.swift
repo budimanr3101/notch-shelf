@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 @main
@@ -86,33 +87,86 @@ final class NotchTerminalActivityController: ObservableObject {
 
     private static let panelIdentifier = NSUserInterfaceItemIdentifier("NotchTerminalActivityPanel")
     private static let finishedDisplayDuration: TimeInterval = 2.2
+    private static let terminalHotKeySignature: OSType = 0x4E535454 // NSTT
 
-    private var timer: Timer?
     private var panel: NotchTerminalActivityPanel?
     private var commandID: String?
     private var currentCommand = ""
-    private var completedAt: Date?
     private var activeStartedAt: Date?
     private var started = false
+    private var terminalExpanded = false
+    private var finishDismissal: DispatchWorkItem?
+    private var terminalResignWork: DispatchWorkItem?
+    private var observers: [NSObjectProtocol] = []
+
     var isRunning: Bool { commandID != nil }
+
     private init() {}
 
     func start() {
         guard !started else { return }
         started = true
-        // Only visibility is sampled. Command lifecycle comes from shell markers.
-        timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshVisibility() }
+
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.installTerminalHotKeyRoute()
+            }
+        })
+        observers.append(center.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self,
+                      let window = note.object as? NSWindow,
+                      self.isFullTerminalWindow(window) else { return }
+                self.terminalResignWork?.cancel()
+                self.terminalResignWork = nil
+                self.terminalExpanded = true
+                self.hidePanel()
+            }
+        })
+        observers.append(center.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self,
+                      let window = note.object as? NSWindow,
+                      self.isFullTerminalWindow(window) else { return }
+                self.scheduleTerminalCollapsed()
+            }
+        })
+
+        if NSApp.isRunning {
+            DispatchQueue.main.async { [weak self] in
+                self?.installTerminalHotKeyRoute()
+            }
         }
+
+        NSLog("[NotchShelf] Background terminal activity ready (event-driven)")
     }
 
     func begin(id: String, command: String) {
+        finishDismissal?.cancel()
+        finishDismissal = nil
+
         let now = Date()
         commandID = id
         currentCommand = command
         activeStartedAt = now
-        completedAt = nil
-        presentation = NotchTerminalActivityPresentation(kind: .running, command: command, startedAt: now)
+        presentation = NotchTerminalActivityPresentation(
+            kind: .running,
+            command: prettyCommand(command),
+            startedAt: now
+        )
         NSLog("[NotchShelf] command started: %@", command)
         refreshVisibility()
     }
@@ -120,38 +174,90 @@ final class NotchTerminalActivityController: ObservableObject {
     func finish(id: String, status: Int32) {
         guard commandID == id else { return }
         commandID = nil
-        completedAt = Date()
-        presentation = NotchTerminalActivityPresentation(kind: status == 0 || status == 130 ? .finished : .failed,
-            command: currentCommand, startedAt: activeStartedAt ?? Date(), exitCode: status)
+
+        presentation = NotchTerminalActivityPresentation(
+            kind: status == 0 || status == 130 ? .finished : .failed,
+            command: prettyCommand(currentCommand),
+            startedAt: activeStartedAt ?? Date(),
+            exitCode: status
+        )
         NSLog("[NotchShelf] command finished: exit=%d", status)
         refreshVisibility()
+
+        finishDismissal?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.commandID == nil else { return }
+            self.presentation = nil
+            self.hidePanel()
+            self.finishDismissal = nil
+        }
+        finishDismissal = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.finishedDisplayDuration,
+            execute: work
+        )
     }
 
     func finishSession(status: Int32) {
-        if let id = commandID { finish(id: id, status: status) }
+        if let id = commandID {
+            finish(id: id, status: status)
+        }
+    }
+
+    private func installTerminalHotKeyRoute() {
+        let status = CarbonHotKeyCenter.shared.setHandler(
+            signature: Self.terminalHotKeySignature,
+            id: 1
+        ) {
+            guard let delegate = NSApp.delegate else {
+                return OSStatus(eventNotHandledErr)
+            }
+            let handled = NSApp.sendAction(
+                NSSelectorFromString("openTerminalAction"),
+                to: delegate,
+                from: nil
+            )
+            NSLog("[NotchShelf] Terminal hotkey routed to AppDelegate handled=%d", handled ? 1 : 0)
+            return handled ? noErr : OSStatus(eventNotHandledErr)
+        }
+
+        if status != noErr {
+            NSLog("[NotchShelf] Terminal hotkey route failed: %d", status)
+        }
+    }
+
+    private func scheduleTerminalCollapsed() {
+        terminalResignWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.terminalExpanded = false
+            self.terminalResignWork = nil
+            self.refreshVisibility()
+        }
+        terminalResignWork = work
+
+        let delay: TimeInterval = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? 0.14
+            : 0.32
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func refreshVisibility() {
-        if let completed = completedAt, Date().timeIntervalSince(completed) >= Self.finishedDisplayDuration {
-            presentation = nil
-            completedAt = nil
+        guard presentation != nil,
+              !terminalExpanded,
+              !isAnotherNotchSurfaceVisible else {
+            hidePanel()
+            return
         }
-        guard presentation != nil, !isTerminalExpanded, !isAnotherNotchSurfaceVisible else {
-            hidePanel(); return
-        }
-        if panel?.isVisible != true { NSLog("[NotchShelf] background activity visible") }
         showPanel()
     }
 
-    private var isTerminalExpanded: Bool {
+    private func isFullTerminalWindow(_ window: NSWindow) -> Bool {
+        guard window.identifier != Self.panelIdentifier else { return false }
         let terminalLevel = NSWindow.Level.mainMenu.rawValue + 1
-        return NSApp.windows.contains { window in
-            guard window.isVisible,
-                  window.identifier != Self.panelIdentifier else { return false }
-            return window.level.rawValue == terminalLevel
-                && window.frame.height > 240
-                && window.frame.width > 360
-        }
+        return window.level.rawValue == terminalLevel
+            && window.frame.height > 240
+            && window.frame.width > 360
     }
 
     private var isAnotherNotchSurfaceVisible: Bool {
@@ -194,10 +300,13 @@ final class NotchTerminalActivityController: ObservableObject {
             panel?.identifier = Self.panelIdentifier
         }
 
+        guard panel?.isVisible != true else { return }
+        NSLog("[NotchShelf] background activity visible")
         panel?.orderFrontRegardless()
     }
 
     private func hidePanel() {
+        guard panel?.isVisible == true else { return }
         panel?.orderOut(nil)
     }
 
@@ -224,7 +333,6 @@ final class NotchTerminalActivityController: ObservableObject {
         }
         return value
     }
-
 }
 
 private struct NotchTerminalActivityMetrics {
