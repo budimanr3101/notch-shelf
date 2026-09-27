@@ -434,6 +434,14 @@ private final class NotchLauncherModel: ObservableObject {
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(
+                fileURLWithPath: "/System/Volumes/Preboot/Cryptexes/App/System/Applications",
+                isDirectory: true
+            ),
+            URL(
+                fileURLWithPath: "/System/Cryptexes/App/System/Applications",
+                isDirectory: true
+            ),
             home.appendingPathComponent("Applications", isDirectory: true),
         ]
 
