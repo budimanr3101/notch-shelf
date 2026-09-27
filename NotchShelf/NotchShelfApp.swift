@@ -38,8 +38,8 @@ private struct NotchTerminalActivityPresentation: Equatable {
 
 private enum NotchTerminalActivityAnimation {
     case packets
-    case runner
-    case spinner
+    case terminalBot
+    case waveform
 
     static func style(for command: String) -> NotchTerminalActivityAnimation {
         let value = command.lowercased()
@@ -49,7 +49,9 @@ private enum NotchTerminalActivityAnimation {
             || value.contains("wget ")
             || value.contains("ssh ")
             || value.contains("scp ")
+            || value.contains("rsync ")
             || value.contains("kubectl logs")
+            || value.contains("kubectl port-forward")
             || value.contains("tail -f") {
             return .packets
         }
@@ -61,11 +63,13 @@ private enum NotchTerminalActivityAnimation {
             || value.contains("terraform ")
             || value.contains("tofu ")
             || value.contains("brew ")
-            || value.contains("git clone") {
-            return .runner
+            || value.contains("git clone")
+            || value.contains("make ")
+            || value.contains("xcodebuild") {
+            return .terminalBot
         }
 
-        return .spinner
+        return .waveform
     }
 }
 
@@ -299,8 +303,8 @@ private final class NotchTerminalActivityController: ObservableObject {
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let tail = pieces.dropFirst().prefix(5)
         var value = ([executable] + tail).joined(separator: " ")
-        if value.count > 46 {
-            value = String(value.prefix(43)) + "…"
+        if value.count > 42 {
+            value = String(value.prefix(39)) + "…"
         }
         return value
     }
@@ -427,9 +431,9 @@ private struct NotchTerminalActivityMetrics {
     let contentWidth: CGFloat
 
     init(geometry: NotchGeometry, screen: NSScreen) {
-        let availableHalfWidth = max(100, (screen.frame.width - geometry.hardwareWidth - 36) / 2)
-        wingWidth = min(142, availableHalfWidth - NotchGeometry.topRadius)
-        depth = 46
+        let availableHalfWidth = max(110, (screen.frame.width - geometry.hardwareWidth - 36) / 2)
+        wingWidth = min(176, availableHalfWidth - NotchGeometry.topRadius)
+        depth = 50
         contentWidth = geometry.hardwareWidth + 2 * wingWidth
         windowSize = CGSize(
             width: geometry.hardwareWidth + 2 * (wingWidth + NotchGeometry.topRadius) + 20,
@@ -488,6 +492,8 @@ private struct NotchTerminalActivityView: View {
     let metrics: NotchTerminalActivityMetrics
     let onOpen: () -> Void
 
+    @State private var hovering = false
+
     private var surface: PocketbookV3Wings {
         PocketbookV3Wings(
             geometry: geometry,
@@ -510,9 +516,9 @@ private struct NotchTerminalActivityView: View {
                         wingWidth: metrics.wingWidth,
                         maximumDepth: metrics.depth
                     )
-                    .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
+                    .stroke(Color.white.opacity(hovering ? 0.17 : 0.105), lineWidth: 0.75)
                 }
-                .shadow(color: Color.black.opacity(0.32), radius: 10, y: 4)
+                .shadow(color: Color.black.opacity(0.34), radius: 11, y: 4)
 
             if let presentation = controller.presentation {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
@@ -526,6 +532,11 @@ private struct NotchTerminalActivityView: View {
         }
         .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
         .contentShape(Rectangle())
+        .onHover { value in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hovering = value
+            }
+        }
         .onTapGesture(perform: onOpen)
     }
 
@@ -533,109 +544,183 @@ private struct NotchTerminalActivityView: View {
         presentation: NotchTerminalActivityPresentation,
         now: Date
     ) -> some View {
-        HStack(spacing: 9) {
-            activityGlyph(presentation: presentation, now: now)
-                .frame(width: 34, height: 26)
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.065))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.white.opacity(0.09), lineWidth: 0.6)
+                        }
+                    Image(systemName: "terminal.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.88))
+                }
+                .frame(width: 25, height: 25)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(presentation.kind == .running ? "Terminal running" : "Finished")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(presentation.kind == .running ? Color.green : Color.green.opacity(0.9))
+                            .frame(width: 5, height: 5)
+                        Text(presentation.kind == .running ? "Terminal running" : "Finished")
+                            .font(.system(size: 8.7, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.43))
+                    }
 
-                Text(presentation.command)
-                    .font(.system(size: 11.5, weight: .medium, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    Text(presentation.command)
+                        .font(.system(size: 10.7, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 6)
+            activityVisual(presentation: presentation, now: now)
+                .frame(width: 92, height: 28)
 
             if presentation.kind == .running {
                 Text(elapsed(from: presentation.startedAt, to: now))
-                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.48))
+                    .font(.system(size: 9.7, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.56))
+                    .frame(minWidth: 38, alignment: .trailing)
             } else {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.green)
+                    .frame(minWidth: 38, alignment: .trailing)
             }
         }
-        .padding(.horizontal, 15)
-        .padding(.top, geometry.hardwareHeight + 5)
+        .padding(.horizontal, 16)
+        .padding(.top, geometry.hardwareHeight + 7)
         .frame(
             width: metrics.contentWidth,
             height: geometry.hardwareHeight + metrics.depth,
             alignment: .top
         )
+        .opacity(hovering ? 1 : 0.96)
     }
 
     @ViewBuilder
-    private func activityGlyph(
+    private func activityVisual(
         presentation: NotchTerminalActivityPresentation,
         now: Date
     ) -> some View {
         if presentation.kind == .finished {
-            let pulse = 1 + 0.06 * sin(now.timeIntervalSinceReferenceDate * 8)
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(Color.green)
-                .scaleEffect(pulse)
+            finishedAnimation(now: now)
         } else {
             switch NotchTerminalActivityAnimation.style(for: presentation.command) {
             case .packets:
                 packetAnimation(now: now)
-            case .runner:
-                runnerAnimation(now: now)
-            case .spinner:
-                spinnerAnimation(now: now)
+            case .terminalBot:
+                terminalBotAnimation(now: now)
+            case .waveform:
+                waveformAnimation(now: now)
             }
         }
     }
 
     private func packetAnimation(now: Date) -> some View {
         GeometryReader { proxy in
-            let width = max(1, proxy.size.width - 6)
-            let base = now.timeIntervalSinceReferenceDate * 0.72
+            let width = max(1, proxy.size.width - 10)
+            let t = now.timeIntervalSinceReferenceDate
 
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(Color.white.opacity(0.055))
                     .frame(height: 2)
+                    .padding(.horizontal, 4)
 
-                ForEach(0..<3, id: \.self) { index in
-                    let phase = (base + Double(index) * 0.31).truncatingRemainder(dividingBy: 1)
+                ForEach(0..<7, id: \.self) { index in
+                    let raw = (t * 0.55 + Double(index) * 0.13).truncatingRemainder(dividingBy: 1)
+                    let phase = raw < 0 ? raw + 1 : raw
+                    let emphasis = 1 - abs(0.5 - phase) * 1.45
                     Circle()
-                        .fill(Color.green.opacity(index == 0 ? 1 : 0.56))
-                        .frame(width: index == 0 ? 5 : 4, height: index == 0 ? 5 : 4)
-                        .offset(x: CGFloat(phase) * width)
+                        .fill(index.isMultiple(of: 2) ? Color.cyan : Color.green)
+                        .frame(
+                            width: 3.5 + max(0, emphasis) * 2.3,
+                            height: 3.5 + max(0, emphasis) * 2.3
+                        )
+                        .opacity(0.25 + max(0, emphasis) * 0.75)
+                        .shadow(
+                            color: (index.isMultiple(of: 2) ? Color.cyan : Color.green).opacity(0.45),
+                            radius: max(0, emphasis) * 4
+                        )
+                        .offset(x: 4 + CGFloat(phase) * width)
                 }
             }
             .frame(maxHeight: .infinity, alignment: .center)
         }
     }
 
-    private func runnerAnimation(now: Date) -> some View {
-        let t = now.timeIntervalSinceReferenceDate
-        let x = sin(t * 3.4) * 7
-        let y = abs(sin(t * 6.8)) * -1.8
+    private func terminalBotAnimation(now: Date) -> some View {
+        GeometryReader { proxy in
+            let t = now.timeIntervalSinceReferenceDate
+            let travel = max(1, proxy.size.width - 31)
+            let raw = (t * 0.32).truncatingRemainder(dividingBy: 1)
+            let phase = raw < 0 ? raw + 1 : raw
+            let bounce = abs(sin(t * 7.4)) * -1.7
 
-        return Image(systemName: "hare.fill")
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(Color.green)
-            .offset(x: x, y: y)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.05))
+                    .frame(height: 2)
+                    .padding(.horizontal, 5)
+
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .fill(Color.green.opacity(0.34 - Double(index) * 0.055))
+                        .frame(width: 3, height: 3)
+                        .offset(
+                            x: max(2, CGFloat(phase) * travel - CGFloat(index * 6)),
+                            y: 0
+                        )
+                }
+
+                TerminalBotGlyph()
+                    .frame(width: 27, height: 24)
+                    .offset(x: CGFloat(phase) * travel, y: bounce)
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+        }
     }
 
-    private func spinnerAnimation(now: Date) -> some View {
-        Circle()
-            .trim(from: 0.08, to: 0.78)
-            .stroke(
-                Color.green,
-                style: StrokeStyle(lineWidth: 2.4, lineCap: .round)
-            )
-            .frame(width: 18, height: 18)
-            .rotationEffect(
-                .degrees(now.timeIntervalSinceReferenceDate * 220)
-            )
+    private func waveformAnimation(now: Date) -> some View {
+        HStack(alignment: .center, spacing: 2.4) {
+            ForEach(0..<11, id: \.self) { index in
+                let t = now.timeIntervalSinceReferenceDate * 4.0
+                let wave = (sin(t + Double(index) * 0.72) + 1) / 2
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.38 + wave * 0.58))
+                    .frame(width: 3.2, height: 4 + wave * 16)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func finishedAnimation(now: Date) -> some View {
+        let t = now.timeIntervalSinceReferenceDate
+        let pulse = 0.94 + 0.06 * sin(t * 7.5)
+
+        return HStack(spacing: 5) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.green.opacity(0.18 + Double(index) * 0.18))
+                    .frame(width: 4, height: 4)
+            }
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(Color.green)
+                .scaleEffect(pulse)
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.green.opacity(0.54 - Double(index) * 0.14))
+                    .frame(width: 4, height: 4)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func elapsed(from start: Date, to now: Date) -> String {
@@ -647,5 +732,37 @@ private struct NotchTerminalActivityView: View {
             return String(format: "%d:%02d:%02d", hours, minutes % 60, remainder)
         }
         return String(format: "%02d:%02d", minutes, remainder)
+    }
+}
+
+private struct TerminalBotGlyph: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.black)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Color.green.opacity(0.9), lineWidth: 1)
+                    }
+                    .shadow(color: Color.green.opacity(0.26), radius: 3)
+
+                Text(">_")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.green)
+            }
+            .frame(width: 22, height: 16)
+
+            HStack(spacing: 7) {
+                Capsule()
+                    .fill(Color.green.opacity(0.75))
+                    .frame(width: 3, height: 4)
+                    .rotationEffect(.degrees(16))
+                Capsule()
+                    .fill(Color.green.opacity(0.75))
+                    .frame(width: 3, height: 4)
+                    .rotationEffect(.degrees(-16))
+            }
+        }
     }
 }
