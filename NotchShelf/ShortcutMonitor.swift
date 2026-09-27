@@ -673,12 +673,12 @@ private final class NotchAppLauncher {
         model.launchingApplication = app
         removeKeyMonitor()
         panel?.ignoresMouseEvents = true
-        NSLog("[NotchShelf] Launcher absorbing %@ into notch", app.name)
+        NSLog("[NotchShelf] Launcher staging %@ before notch absorb", app.name)
 
         pendingLaunch?.cancel()
         let delay: TimeInterval = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            ? 0.08
-            : 0.36
+            ? 0.10
+            : 0.72
 
         let work = DispatchWorkItem { [weak self] in
             guard let self,
@@ -687,8 +687,8 @@ private final class NotchAppLauncher {
             let opened = NSWorkspace.shared.open(app.url)
             NSLog(
                 opened
-                    ? "[NotchShelf] Launcher opened %@ after absorb"
-                    : "[NotchShelf] Launcher failed to open %@ after absorb",
+                    ? "[NotchShelf] Launcher opened %@ after staged absorb"
+                    : "[NotchShelf] Launcher failed to open %@ after staged absorb",
                 app.name
             )
             self.pendingLaunch = nil
@@ -815,7 +815,7 @@ private struct NotchLauncherView: View {
     @State private var bridgeExpansion: CGFloat = 0
     @State private var contentVisible = false
     @State private var selectedRowFrame: CGRect = .zero
-    @State private var absorbProgress: CGFloat = 0
+    @State private var absorbProgress: CGFloat = -1
     @State private var notchPulse: CGFloat = 0
     @State private var pendingMotion: [DispatchWorkItem] = []
 
@@ -860,7 +860,7 @@ private struct NotchLauncherView: View {
                 )
                 .mask(surface)
                 .opacity(contentOpacity)
-                .blur(radius: model.launchingApplication == nil ? 0 : 0.7)
+                .blur(radius: model.launchingApplication == nil ? 0 : 1.0)
                 .offset(y: reduceMotion || contentVisible ? 0 : -6)
                 .allowsHitTesting(
                     model.presented
@@ -891,7 +891,7 @@ private struct NotchLauncherView: View {
             if app != nil {
                 animateAbsorb()
             } else {
-                absorbProgress = 0
+                absorbProgress = -1
                 notchPulse = 0
             }
         }
@@ -911,7 +911,7 @@ private struct NotchLauncherView: View {
 
     private var contentOpacity: Double {
         guard contentVisible else { return 0 }
-        return model.launchingApplication == nil ? 1 : 0.42
+        return model.launchingApplication == nil ? 1 : 0.24
     }
 
     private var content: some View {
@@ -1116,53 +1116,57 @@ private struct NotchLauncherView: View {
 
     @ViewBuilder
     private func absorbOverlay(_ app: NotchLauncherApplication) -> some View {
-        let fallbackX = metrics.windowSize.width / 2
-        let fallbackY = geometry.hardwareHeight + metrics.depth * 0.48
-        let startX = selectedRowFrame == .zero
-            ? fallbackX
-            : selectedRowFrame.minX + 28
-        let startY = selectedRowFrame == .zero
-            ? fallbackY
-            : selectedRowFrame.midY
-        let targetX = metrics.windowSize.width / 2
+        let centerX = metrics.windowSize.width / 2
+        let showcaseY = geometry.hardwareHeight + 78
         let targetY = max(6, geometry.hardwareHeight - 2)
-        let progress = min(max(absorbProgress, 0), 1)
-        let arc = progress * (1 - progress) * 36
-        let x = startX + (targetX - startX) * progress + arc
-        let y = startY + (targetY - startY) * progress
-        let scale = max(0.12, 1 - 0.88 * progress)
+        let stage = min(max(absorbProgress, -1), 1)
+        let reveal = stage < 0 ? 1 + stage : 1
+        let travel = max(0, stage)
+        let fade = min(1, travel * travel * travel)
+        let y = showcaseY + (targetY - showcaseY) * travel
+        let scale = stage < 0
+            ? 0.72 + 0.28 * reveal
+            : max(0.10, 1 - 0.90 * travel)
+        let opacity = stage < 0
+            ? Double(reveal)
+            : max(0, 1 - 0.95 * Double(fade))
 
         ZStack {
             Circle()
+                .fill(Color.white.opacity(0.055 * Double(reveal) * Double(1 - travel)))
+                .frame(width: 88, height: 88)
+                .position(x: centerX, y: showcaseY)
+                .blur(radius: 8)
+
+            Circle()
                 .stroke(
-                    Color.white.opacity(0.24 * Double(notchPulse)),
+                    Color.white.opacity(0.25 * Double(notchPulse)),
                     lineWidth: 1
                 )
                 .frame(
-                    width: 24 + 26 * notchPulse,
-                    height: 24 + 26 * notchPulse
+                    width: 24 + 28 * notchPulse,
+                    height: 24 + 28 * notchPulse
                 )
-                .position(x: targetX, y: targetY + 2)
+                .position(x: centerX, y: targetY + 2)
                 .blur(radius: 0.3)
 
             Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 38, height: 38)
+                .frame(width: 64, height: 64)
                 .scaleEffect(scale)
-                .rotationEffect(.degrees(-5 * Double(progress)))
-                .opacity(max(0, 1 - 0.86 * Double(progress)))
+                .opacity(opacity)
                 .shadow(
-                    color: Color.white.opacity(0.13 * Double(1 - progress)),
-                    radius: 9
+                    color: Color.white.opacity(0.18 * Double(1 - travel)),
+                    radius: 12
                 )
-                .position(x: x, y: y)
+                .position(x: centerX, y: y)
         }
         .allowsHitTesting(false)
     }
 
     private func animateAbsorb() {
-        absorbProgress = 0
+        absorbProgress = -1
         notchPulse = 0
         searchFocused = false
 
@@ -1172,14 +1176,24 @@ private struct NotchLauncherView: View {
             return
         }
 
-        withAnimation(.timingCurve(0.18, 0.82, 0.22, 1, duration: 0.32)) {
-            absorbProgress = 1
+        withAnimation(.easeOut(duration: 0.14)) {
+            absorbProgress = 0
         }
-        withAnimation(.easeOut(duration: 0.10)) {
-            notchPulse = 1
+
+        schedule(after: 0.36) {
+            withAnimation(.timingCurve(0.20, 0.82, 0.24, 1, duration: 0.28)) {
+                absorbProgress = 1
+            }
         }
-        schedule(after: 0.12) {
-            withAnimation(.easeInOut(duration: 0.20)) {
+
+        schedule(after: 0.46) {
+            withAnimation(.easeOut(duration: 0.10)) {
+                notchPulse = 1
+            }
+        }
+
+        schedule(after: 0.56) {
+            withAnimation(.easeInOut(duration: 0.16)) {
                 notchPulse = 0
             }
         }
