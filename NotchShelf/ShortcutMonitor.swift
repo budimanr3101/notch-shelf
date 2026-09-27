@@ -1119,7 +1119,7 @@ private struct NotchLauncherView: View {
         let targetX = metrics.windowSize.width / 2
         let targetY = max(6, geometry.hardwareHeight - 2)
         let progress = min(max(absorbProgress, 0), 1)
-        let arc = sin(progress * .pi) * 10
+        let arc = progress * (1 - progress) * 36
         let x = startX + (targetX - startX) * progress + arc
         let y = startY + (targetY - startY) * progress
         let scale = max(0.12, 1 - 0.88 * progress)
