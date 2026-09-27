@@ -326,7 +326,9 @@ private final class NotchLauncherModel: ObservableObject {
     var results: [NotchLauncherApplication] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let recent = recentApplications
-        let recentRank = Dictionary(uniqueKeysWithValues: recent.enumerated().map { ($0.element, $0.offset) })
+        let recentRank = Dictionary(
+            uniqueKeysWithValues: recent.enumerated().map { ($0.element, $0.offset) }
+        )
 
         if trimmed.isEmpty {
             return applications.sorted { lhs, rhs in
@@ -335,8 +337,6 @@ private final class NotchLauncherModel: ObservableObject {
                 if leftRank != rightRank { return leftRank < rightRank }
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
-            .prefix(8)
-            .map { $0 }
         }
 
         let needle = normalize(trimmed)
@@ -349,7 +349,6 @@ private final class NotchLauncherModel: ObservableObject {
             if lhs.2 != rhs.2 { return lhs.2 < rhs.2 }
             return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
         }
-        .prefix(8)
         .map { $0.0 }
     }
 
@@ -687,7 +686,8 @@ private final class NotchAppLauncher {
                 self.launchSelected()
                 return nil
             default:
-                if event.modifierFlags.contains(.command), event.keyCode == UInt16(kVK_ANSI_R) {
+                if event.modifierFlags.contains(.command),
+                   event.keyCode == UInt16(kVK_ANSI_R) {
                     self.model.refreshApplications()
                     return nil
                 }
@@ -795,13 +795,21 @@ private struct NotchLauncherView: View {
                 )
 
             content
-                .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
+                .frame(
+                    width: metrics.windowSize.width,
+                    height: metrics.windowSize.height,
+                    alignment: .top
+                )
                 .mask(surface)
                 .opacity(contentVisible ? 1 : 0)
                 .offset(y: reduceMotion || contentVisible ? 0 : -6)
                 .allowsHitTesting(model.presented && contentVisible)
         }
-        .frame(width: metrics.windowSize.width, height: metrics.windowSize.height, alignment: .top)
+        .frame(
+            width: metrics.windowSize.width,
+            height: metrics.windowSize.height,
+            alignment: .top
+        )
         .clipped()
         .onChange(of: model.presented) { visible in
             animatePresentation(visible)
@@ -877,28 +885,58 @@ private struct NotchLauncherView: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(searchFocused ? 0.15 : 0.08), lineWidth: 0.8)
+                .stroke(
+                    Color.white.opacity(searchFocused ? 0.15 : 0.08),
+                    lineWidth: 0.8
+                )
         }
     }
 
     private var results: some View {
-        VStack(spacing: 4) {
-            let visible = model.results
-            if visible.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "app.dashed")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.22))
-                    Text(model.query.isEmpty ? "No applications indexed" : "No application found")
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                let visible = model.results
+
+                if visible.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "app.dashed")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.22))
+                        Text(
+                            model.query.isEmpty
+                                ? "No applications indexed"
+                                : "No application found"
+                        )
                         .font(.system(size: 12.5, weight: .medium, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.42))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 72)
+                } else {
+                    LazyVStack(spacing: 4) {
+                        ForEach(Array(visible.enumerated()), id: \.element.id) { index, app in
+                            resultRow(app, index: index)
+                                .id(app.id)
+                        }
+                    }
+                    .padding(.vertical, 1)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ForEach(Array(visible.enumerated()), id: \.element.id) { index, app in
-                    resultRow(app, index: index)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: model.selectedIndex) { index in
+                let visible = model.results
+                guard visible.indices.contains(index) else { return }
+                let app = visible[index]
+                withAnimation(.easeOut(duration: 0.12)) {
+                    proxy.scrollTo(app.id, anchor: .center)
                 }
-                Spacer(minLength: 0)
+            }
+            .onChange(of: model.query) { _ in
+                let visible = model.results
+                guard let first = visible.first else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(first.id, anchor: .top)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
