@@ -28,7 +28,11 @@ struct PocketbookV3Shortcut: Equatable {
         if flags.contains(.option) { modifiers |= UInt32(optionKey) }
         if flags.contains(.control) { modifiers |= UInt32(controlKey) }
         if flags.contains(.shift) { modifiers |= UInt32(shiftKey) }
-        guard modifiers != 0 else { return nil }
+
+        // A global Shift-only shortcut would swallow normal capital-letter typing.
+        // Require at least one non-Shift modifier; Shift remains valid as an addition.
+        let safeGlobalModifiers = UInt32(cmdKey | optionKey | controlKey)
+        guard modifiers & safeGlobalModifiers != 0 else { return nil }
 
         let characters = event.charactersIgnoringModifiers?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -261,7 +265,7 @@ final class PocketbookFeatureV3 {
     func showShortcutRecorder() {
         let alert = NSAlert()
         alert.messageText = "Pocketbook Shortcut"
-        alert.informativeText = "Press a shortcut using ⌘, ⌥, ⌃, or ⇧. It works globally from any app."
+        alert.informativeText = "Press a shortcut using ⌘, ⌥, or ⌃. Shift may be added."
         let recorder = PocketbookV3ShortcutCaptureView(current: shortcut)
         alert.accessoryView = recorder
         alert.addButton(withTitle: "Save")
