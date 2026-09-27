@@ -44,27 +44,27 @@ private enum NotchTerminalActivityAnimation {
     static func style(for command: String) -> NotchTerminalActivityAnimation {
         let value = command.lowercased()
 
-        if value.contains("ping ")
-            || value.contains("curl ")
-            || value.contains("wget ")
-            || value.contains("ssh ")
-            || value.contains("scp ")
-            || value.contains("rsync ")
+        if value.contains("ping")
+            || value.contains("curl")
+            || value.contains("wget")
+            || value.contains("ssh")
+            || value.contains("scp")
+            || value.contains("rsync")
             || value.contains("kubectl logs")
             || value.contains("kubectl port-forward")
             || value.contains("tail -f") {
             return .packets
         }
 
-        if value.contains("docker ")
-            || value.contains("npm ")
-            || value.contains("pnpm ")
-            || value.contains("yarn ")
-            || value.contains("terraform ")
-            || value.contains("tofu ")
-            || value.contains("brew ")
+        if value.contains("docker")
+            || value.contains("npm")
+            || value.contains("pnpm")
+            || value.contains("yarn")
+            || value.contains("terraform")
+            || value.contains("tofu")
+            || value.contains("brew")
             || value.contains("git clone")
-            || value.contains("make ")
+            || value.contains("make")
             || value.contains("xcodebuild") {
             return .terminalBot
         }
@@ -80,7 +80,7 @@ private final class NotchTerminalActivityController: ObservableObject {
     @Published private(set) var presentation: NotchTerminalActivityPresentation?
 
     private static let panelIdentifier = NSUserInterfaceItemIdentifier("NotchTerminalActivityPanel")
-    private static let minimumVisibleRuntime: TimeInterval = 0.85
+    private static let minimumVisibleRuntime: TimeInterval = 0.65
     private static let finishedDisplayDuration: TimeInterval = 2.2
 
     private var timer: Timer?
@@ -90,6 +90,7 @@ private final class NotchTerminalActivityController: ObservableObject {
     private var completionWork: DispatchWorkItem?
     private var polling = false
     private var started = false
+    private var lastLoggedProcess: NotchTerminalForegroundProcess?
 
     private init() {}
 
@@ -97,12 +98,12 @@ private final class NotchTerminalActivityController: ObservableObject {
         guard !started else { return }
         started = true
 
-        timer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.poll()
             }
         }
-        timer?.tolerance = 0.08
+        timer?.tolerance = 0.06
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -126,6 +127,9 @@ private final class NotchTerminalActivityController: ObservableObject {
         panel?.orderOut(nil)
         panel = nil
         presentation = nil
+        activeProcess = nil
+        activeStartedAt = nil
+        lastLoggedProcess = nil
         started = false
     }
 
@@ -139,8 +143,20 @@ private final class NotchTerminalActivityController: ObservableObject {
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.polling = false
+                self.logDetectionChange(foreground)
                 self.apply(foreground)
             }
+        }
+    }
+
+    private func logDetectionChange(_ process: NotchTerminalForegroundProcess?) {
+        guard process != lastLoggedProcess else { return }
+        lastLoggedProcess = process
+
+        if let process = process {
+            NSLog("[NotchShelf] Terminal activity detected pid=%d: %@", process.pid, process.command)
+        } else {
+            NSLog("[NotchShelf] Terminal activity idle")
         }
     }
 
@@ -324,24 +340,37 @@ private final class NotchTerminalActivityController: ObservableObject {
 
         let rootDescendants = descendants(of: rootPID, entries: entries)
         let scripts = entries.filter { entry in
-            rootDescendants.contains(entry.pid)
-                && entry.command.contains("/usr/bin/script")
-                && entry.command.contains("/bin/zsh")
+            rootDescendants.contains(entry.pid) && isScriptProcess(entry.command)
         }
 
-        for script in scripts {
+        for script in scripts.sorted(by: { $0.pid > $1.pid }) {
             let terminalDescendants = descendants(of: script.pid, entries: entries)
             let candidates = entries.filter { entry in
                 terminalDescendants.contains(entry.pid)
-                    && entry.foregroundPGID > 0
-                    && entry.pgid == entry.foregroundPGID
                     && !isShellProcess(entry.command)
+                    && !isTerminalHelperProcess(entry.command)
             }
 
-            if let leader = candidates.first(where: { $0.pid == $0.pgid }) ?? candidates.first {
+            guard !candidates.isEmpty else { continue }
+
+            // Prefer the normal foreground process group when macOS exposes it.
+            if let foreground = candidates
+                .filter({ $0.foregroundPGID > 0 && $0.pgid == $0.foregroundPGID })
+                .sorted(by: { $0.pid > $1.pid })
+                .first {
                 return NotchTerminalForegroundProcess(
-                    pid: leader.pid,
-                    command: leader.command
+                    pid: foreground.pid,
+                    command: foreground.command
+                )
+            }
+
+            // `script(1)` can expose a PTY without a usable tpgid when stdin is a Pipe.
+            // In that case the newest non-shell descendant is the command launched by
+            // the interactive zsh session. This keeps ping/sleep/ssh/build jobs visible.
+            if let fallback = candidates.sorted(by: { $0.pid > $1.pid }).first {
+                return NotchTerminalForegroundProcess(
+                    pid: fallback.pid,
+                    command: fallback.command
                 )
             }
         }
@@ -410,17 +439,37 @@ private final class NotchTerminalActivityController: ObservableObject {
         return result
     }
 
-    private nonisolated static func isShellProcess(_ command: String) -> Bool {
+    private nonisolated static func executableName(_ command: String) -> String {
         let first = command.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
-        let executable = URL(fileURLWithPath: first)
+        return URL(fileURLWithPath: first)
             .lastPathComponent
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             .lowercased()
+    }
 
+    private nonisolated static func isScriptProcess(_ command: String) -> Bool {
+        let executable = executableName(command)
+        return executable == "script"
+            || command.contains("/usr/bin/script")
+    }
+
+    private nonisolated static func isShellProcess(_ command: String) -> Bool {
+        let executable = executableName(command)
         return executable == "zsh"
             || executable == "sh"
+            || executable == "bash"
             || executable == "script"
             || executable == "stty"
+    }
+
+    private nonisolated static func isTerminalHelperProcess(_ command: String) -> Bool {
+        let value = command.lowercased()
+        return value.contains("kiro-cli-autocomplete")
+            || value.contains("starship")
+            || value.contains("zsh-autosuggest")
+            || value.contains("zsh-syntax-highlighting")
+            || value.contains("powerlevel10k")
+            || value.contains("p10k")
     }
 }
 
@@ -562,7 +611,7 @@ private struct NotchTerminalActivityView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(presentation.kind == .running ? Color.green : Color.green.opacity(0.9))
+                            .fill(Color.green)
                             .frame(width: 5, height: 5)
                         Text(presentation.kind == .running ? "Terminal running" : "Finished")
                             .font(.system(size: 8.7, weight: .semibold, design: .rounded))
