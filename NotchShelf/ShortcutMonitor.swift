@@ -1,5 +1,98 @@
 import AppKit
 import Carbon.HIToolbox
+import Darwin
+
+/// Prepares the embedded terminal to behave like an interactive zsh session
+/// instead of replaying login-only startup files inside NotchShelf.app.
+///
+/// `NotchTerminalShell` currently creates a temporary ZDOTDIR and mirrors the
+/// user's startup files into it. By pointing its source directory at this
+/// bridge, only the startup files an interactive shell actually needs are
+/// forwarded: `.zshenv` and `.zshrc`. Login-only `.zprofile` / `.zlogin` are
+/// intentionally omitted so app-launch automation and macOS/TCC side effects
+/// are not replayed every time the notch terminal starts.
+private enum NotchTerminalZshEnvironment {
+    private static let bridgeFolderName = "notchshelf-interactive-zdotdir"
+
+    static func prepare() {
+        let fileManager = FileManager.default
+        let bridge = fileManager.temporaryDirectory
+            .appendingPathComponent(bridgeFolderName, isDirectory: true)
+
+        let inheritedZDOTDIR = ProcessInfo.processInfo.environment["ZDOTDIR"]
+        if inheritedZDOTDIR == bridge.path {
+            return
+        }
+
+        let original = inheritedZDOTDIR.map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? fileManager.homeDirectoryForCurrentUser
+
+        do {
+            if fileManager.fileExists(atPath: bridge.path) {
+                try fileManager.removeItem(at: bridge)
+            }
+            try fileManager.createDirectory(
+                at: bridge,
+                withIntermediateDirectories: true
+            )
+
+            try zshenvBridge(original: original).write(
+                to: bridge.appendingPathComponent(".zshenv"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try zshrcBridge(original: original).write(
+                to: bridge.appendingPathComponent(".zshrc"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            setenv("ZDOTDIR", bridge.path, 1)
+            NSLog(
+                "[NotchShelf] Embedded zsh startup: interactive config only (.zshenv + .zshrc)"
+            )
+        } catch {
+            NSLog(
+                "[NotchShelf] Could not prepare embedded zsh config bridge: %@",
+                error.localizedDescription
+            )
+        }
+    }
+
+    private static func zshenvBridge(original: URL) -> String {
+        let directory = shellQuote(original.path)
+        let zshenv = shellQuote(original.appendingPathComponent(".zshenv").path)
+
+        return """
+        _NOTCHSHELF_SESSION_ZDOTDIR="$ZDOTDIR"
+        export ZDOTDIR=\(directory)
+        [[ -f \(zshenv) ]] && source \(zshenv)
+        _NOTCHSHELF_USER_ZDOTDIR="$ZDOTDIR"
+        export ZDOTDIR="$_NOTCHSHELF_SESSION_ZDOTDIR"
+        unset _NOTCHSHELF_SESSION_ZDOTDIR
+        """ + "\n"
+    }
+
+    private static func zshrcBridge(original: URL) -> String {
+        let fallback = shellQuote(original.path)
+
+        return """
+        _NOTCHSHELF_SESSION_ZDOTDIR="$ZDOTDIR"
+        if [[ -z ${_NOTCHSHELF_USER_ZDOTDIR-} ]]; then
+            _NOTCHSHELF_USER_ZDOTDIR=\(fallback)
+        fi
+        export ZDOTDIR="$_NOTCHSHELF_USER_ZDOTDIR"
+        [[ -f "$ZDOTDIR/.zshrc" ]] && source "$ZDOTDIR/.zshrc"
+        export ZDOTDIR="$_NOTCHSHELF_SESSION_ZDOTDIR"
+        unset _NOTCHSHELF_SESSION_ZDOTDIR
+        """ + "\n"
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+}
 
 /// A single Carbon event handler for every NotchShelf global hotkey.
 ///
@@ -15,7 +108,9 @@ final class CarbonHotKeyCenter {
     private var eventHandler: EventHandlerRef?
     private var callbacks: [UInt64: Callback] = [:]
 
-    private init() {}
+    private init() {
+        NotchTerminalZshEnvironment.prepare()
+    }
 
     func setHandler(
         signature: OSType,
