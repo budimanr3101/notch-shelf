@@ -624,7 +624,7 @@ private struct NotchTerminalActivityView: View {
 
     private func packetAnimation(now: Date) -> some View {
         GeometryReader { proxy in
-            let width = max(1, proxy.size.width - 10)
+            let width = max(CGFloat(1), proxy.size.width - 10)
             let t = now.timeIntervalSinceReferenceDate
 
             ZStack(alignment: .leading) {
@@ -637,16 +637,14 @@ private struct NotchTerminalActivityView: View {
                     let raw = (t * 0.55 + Double(index) * 0.13).truncatingRemainder(dividingBy: 1)
                     let phase = raw < 0 ? raw + 1 : raw
                     let emphasis = 1 - abs(0.5 - phase) * 1.45
+                    let dotSize = CGFloat(3.5 + max(0, emphasis) * 2.3)
                     Circle()
                         .fill(index.isMultiple(of: 2) ? Color.cyan : Color.green)
-                        .frame(
-                            width: 3.5 + max(0, emphasis) * 2.3,
-                            height: 3.5 + max(0, emphasis) * 2.3
-                        )
+                        .frame(width: dotSize, height: dotSize)
                         .opacity(0.25 + max(0, emphasis) * 0.75)
                         .shadow(
                             color: (index.isMultiple(of: 2) ? Color.cyan : Color.green).opacity(0.45),
-                            radius: max(0, emphasis) * 4
+                            radius: CGFloat(max(0, emphasis) * 4)
                         )
                         .offset(x: 4 + CGFloat(phase) * width)
                 }
@@ -658,10 +656,10 @@ private struct NotchTerminalActivityView: View {
     private func terminalBotAnimation(now: Date) -> some View {
         GeometryReader { proxy in
             let t = now.timeIntervalSinceReferenceDate
-            let travel = max(1, proxy.size.width - 31)
+            let travel = max(CGFloat(1), proxy.size.width - 31)
             let raw = (t * 0.32).truncatingRemainder(dividingBy: 1)
             let phase = raw < 0 ? raw + 1 : raw
-            let bounce = abs(sin(t * 7.4)) * -1.7
+            let bounce = CGFloat(abs(sin(t * 7.4)) * -1.7)
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -674,7 +672,7 @@ private struct NotchTerminalActivityView: View {
                         .fill(Color.green.opacity(0.34 - Double(index) * 0.055))
                         .frame(width: 3, height: 3)
                         .offset(
-                            x: max(2, CGFloat(phase) * travel - CGFloat(index * 6)),
+                            x: max(CGFloat(2), CGFloat(phase) * travel - CGFloat(index * 6)),
                             y: 0
                         )
                 }
@@ -694,7 +692,7 @@ private struct NotchTerminalActivityView: View {
                 let wave = (sin(t + Double(index) * 0.72) + 1) / 2
                 Capsule()
                     .fill(Color.accentColor.opacity(0.38 + wave * 0.58))
-                    .frame(width: 3.2, height: 4 + wave * 16)
+                    .frame(width: 3.2, height: CGFloat(4 + wave * 16))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -702,7 +700,7 @@ private struct NotchTerminalActivityView: View {
 
     private func finishedAnimation(now: Date) -> some View {
         let t = now.timeIntervalSinceReferenceDate
-        let pulse = 0.94 + 0.06 * sin(t * 7.5)
+        let pulse = CGFloat(0.94 + 0.06 * sin(t * 7.5))
 
         return HStack(spacing: 5) {
             ForEach(0..<3, id: \.self) { index in
