@@ -1,0 +1,51 @@
+name: macOS CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'hardening/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build NotchShelf
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Validate shared scheme
+        run: |
+          xcodebuild \
+            -project NotchShelf.xcodeproj \
+            -list
+
+      - name: Build Debug
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchShelf.xcodeproj \
+            -scheme NotchShelf \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/NotchShelfDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
