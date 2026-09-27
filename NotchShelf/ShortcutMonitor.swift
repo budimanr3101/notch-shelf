@@ -1130,13 +1130,14 @@ private struct NotchLauncherView: View {
         let opacity = stage < 0
             ? Double(reveal)
             : max(0, 1 - 0.95 * Double(fade))
+        let labelOpacity = Double(reveal) * max(0, 1 - Double(travel * 3.2))
 
         ZStack {
             Circle()
                 .fill(Color.white.opacity(0.055 * Double(reveal) * Double(1 - travel)))
-                .frame(width: 88, height: 88)
+                .frame(width: 102, height: 102)
                 .position(x: centerX, y: showcaseY)
-                .blur(radius: 8)
+                .blur(radius: 9)
 
             Circle()
                 .stroke(
@@ -1153,7 +1154,7 @@ private struct NotchLauncherView: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 64, height: 64)
+                .frame(width: 76, height: 76)
                 .scaleEffect(scale)
                 .opacity(opacity)
                 .shadow(
@@ -1161,6 +1162,14 @@ private struct NotchLauncherView: View {
                     radius: 12
                 )
                 .position(x: centerX, y: y)
+
+            Text("Open \(app.name)")
+                .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.88))
+                .lineLimit(1)
+                .opacity(labelOpacity)
+                .shadow(color: Color.black.opacity(0.55), radius: 4, y: 1)
+                .position(x: centerX, y: showcaseY + 56)
         }
         .allowsHitTesting(false)
     }
