@@ -1,42 +1,183 @@
-# NotchShelf
+<h1 align="center">
+  <br>
+  NotchShelf
+  <br>
+</h1>
 
-**Cut. Carry. Paste.**
+<h3 align="center">A productivity command surface built into your MacBook notch.</h3>
 
-NotchShelf is a small macOS utility that turns the MacBook notch into a transient file shelf.
+<p align="center">
+  <a href="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml"><img src="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml/badge.svg" alt="macOS CI"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-black.svg?logo=apple" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Swift-SwiftUI-black.svg?logo=swift" alt="Swift / SwiftUI">
+  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest"><img src="https://img.shields.io/github/v/release/budimanr3101/notch-shelf?display_name=tag&label=release&color=black" alt="Latest Release"></a>
+</p>
 
-## MVP
+<p align="center">
+  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-NotchShelf.dmg-black?style=for-the-badge&logo=apple" alt="Download NotchShelf for macOS"></a>
+</p>
 
-1. Select one or more files/folders in Finder.
-2. Press `Cmd + X` to stage them in NotchShelf.
-3. Navigate to the destination folder in Finder.
-4. Press `Cmd + V` to move the staged items there.
+NotchShelf turns the physical MacBook notch into a compact workspace for moving files, opening developer projects, keeping DevOps references nearby, and running a real terminal without leaving the top of your screen.
 
-The original files are not moved when `Cmd + X` is pressed. They are only moved after `Cmd + V`.
+The interface is designed around the actual hardware notch rather than a generic floating pill. Primary surfaces expand from the notch and collapse back into it when you are done.
 
-## Notch UI
+---
 
-- The overlay is anchored to the physical MacBook notch.
-- The closed software silhouette matches the measured hardware notch and expands downward/outward from it.
-- There is intentionally no floating-pill fallback on displays without a physical notch.
-- Notch geometry and silhouette behavior are adapted from the approach used by [jonnyoo/glance](https://github.com/jonnyoo/glance), licensed under MIT.
+## Installation
 
-## Safety behavior
+**Requirements**
 
-- Existing destination names are never overwritten in the MVP.
-- Same-folder moves are rejected.
-- Cross-volume moves copy first and delete the source only after the copy succeeds.
-- `Cmd + V` is intercepted only while NotchShelf actually has staged items. Otherwise Finder receives the shortcut normally.
+- macOS 15 or later
+- A MacBook with a physical display notch is recommended
 
-## Requirements
+1. Download [`NotchShelf.dmg`](https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg).
+2. Open the DMG.
+3. Drag **NotchShelf** into **Applications**.
+4. Launch NotchShelf from Applications.
+5. Allow Finder Automation when macOS asks for it.
+
+NotchShelf runs as a menu bar utility, so it does not keep a normal Dock window open.
+
+> [!NOTE]
+> Public releases are intended to be Developer ID signed and Apple notarized before publication. Release builds should still be runtime-tested on a real Mac before being published.
+
+## Features
+
+| Feature | Description |
+| --- | --- |
+| **File Shelf** | Use Finder `Command + X` to stage files and `Command + V` to move them into another Finder folder. |
+| **Developer Drop Zone** | Drag a file or project toward the notch and open it quickly in Finder, Terminal, iTerm2, VS Code, Cursor, Xcode, JetBrains IDEs, Warp, Zed, or a custom app. |
+| **Pocketbook** | Searchable Kubernetes, YAML, `kubectl`, and DevOps references with fast clipboard copy. |
+| **Native Notch Terminal** | A real PTY powered by SwiftTerm with native Zsh input, Tab completion, history, `Ctrl + R`, `Ctrl + C`, and interactive terminal apps. |
+| **Background Terminal Activity** | Long-running commands can surface a compact activity indicator after the full terminal is hidden. |
+| **Single Primary Surface** | Terminal, Pocketbook, and other large notch experiences are coordinated so they do not stack on top of each other. |
+| **Physical Notch UI** | The interface expands from the real MacBook notch geometry instead of imitating it with a detached floating window. |
+
+## File Shelf
+
+Select one or more files or folders in Finder, press `Command + X`, navigate to another folder, then press `Command + V`.
+
+The original files are **not** moved when `Command + X` is pressed. They are moved only after `Command + V`.
+
+NotchShelf applies a conservative file-move policy:
+
+- Existing destination items are never overwritten.
+- The entire batch is validated before mutation starts.
+- Duplicate destinations are rejected.
+- Moving a folder into its own descendant is rejected.
+- Cross-volume moves fall back to copy-then-delete only for `EXDEV`.
+- If the source cannot be deleted after a successful cross-volume copy, the destination copy is preserved. Duplicate data is safer than lost data.
+
+## Developer Drop Zone
+
+Drop a file or project near the notch and NotchShelf can route it to the developer tool you use most.
+
+Supported built-in targets include:
+
+- Finder
+- Terminal
+- iTerm2
+- Visual Studio Code
+- Cursor
+- Xcode
+- IntelliJ IDEA
+- WebStorm
+- PyCharm
+- GoLand
+- Rider
+- DataGrip
+- Warp
+- Zed
+- Custom macOS application
+
+The most recent project is remembered so it can be reopened quickly from the menu bar.
+
+## Pocketbook
+
+Pocketbook keeps common DevOps references one shortcut away.
+
+- Kubernetes and YAML references
+- `kubectl` snippets
+- Search and category filtering
+- One-click clipboard copy
+- Configurable global shortcut
+
+Default shortcut: `Option + K`.
+
+## Native Notch Terminal
+
+The Notch Terminal uses [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) with a real PTY and `/bin/zsh -l`.
+
+That means terminal input goes directly to the shell instead of through a separate command field.
+
+- Native shell prompt and cursor
+- Zsh Tab completion
+- Arrow-key command history
+- `Ctrl + R` reverse history search
+- `Ctrl + C` process interruption
+- `vi`, `nvim`, `less`, and other terminal applications can use terminal emulation
+- `TERM=xterm-256color`
+- True-color terminal support
+- Existing Zsh startup configuration remains available
+
+Default shortcut: `Shift + Command + N`.
+
+## Shortcuts
+
+| Action | Default |
+| --- | --- |
+| Stage Finder selection | `Command + X` |
+| Move staged Finder items | `Command + V` |
+| Open Pocketbook | `Option + K` |
+| Open Notch Terminal | `Shift + Command + N` |
+
+Pocketbook and Terminal shortcuts are configurable. Unsafe Shift-only global shortcuts are rejected so NotchShelf does not accidentally hijack normal typing.
+
+Global hotkeys use Carbon registration and do **not** require Accessibility or Input Monitoring permission.
+
+## Privacy
+
+NotchShelf is designed to keep file and terminal activity local.
+
+- Raw terminal commands are not written to `NSLog`.
+- Interactive terminal responses are not copied into the legacy custom-command history path.
+- Staged files are moved locally and are not uploaded to a remote service.
+- Finder Automation is used only to read the current Finder selection and destination folder for File Shelf actions.
+
+## Building from source
+
+### Prerequisites
 
 - macOS 15+
 - Xcode 16+
-- Finder Automation permission when macOS asks for it
 
-Global `Cmd + X` / `Cmd + V` handling uses Carbon hotkey registration and does not require Accessibility or Input Monitoring permission.
+```bash
+git clone https://github.com/budimanr3101/notch-shelf.git
+cd notch-shelf
+open NotchShelf.xcodeproj
+```
 
-## Build
-
-Open `NotchShelf.xcodeproj`, select your Personal Team under **Signing & Capabilities**, then run on **My Mac**.
+Select your development team under **Signing & Capabilities**, choose the **NotchShelf** scheme, and run on **My Mac**.
 
 Bundle identifier: `com.budiman.notchshelf`
+
+SwiftTerm is pinned through Swift Package Manager for the native terminal surface.
+
+## Contributing
+
+Issues and pull requests are welcome. For UI changes, please preserve the physical-notch geometry and avoid replacing the hardware-connected notch surface with a detached floating pill.
+
+## Release process
+
+Maintainer instructions for Developer ID signing, Apple notarization, DMG generation, checksums, and GitHub Releases are documented in [`docs/RELEASING.md`](docs/RELEASING.md).
+
+CI passing means the project compiles successfully on GitHub's macOS runner. Interactive terminal behavior, notch placement, drag behavior, and other UI details still require real-Mac runtime testing before a public release.
+
+## Credits
+
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) provides the native terminal emulation layer.
+- The physical-notch geometry approach is adapted from [jonnyoo/glance](https://github.com/jonnyoo/glance), licensed under MIT.
+
+---
+
+<p align="center"><strong>NotchShelf</strong> · built for the space your screen already gave up.</p>
