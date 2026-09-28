@@ -23,6 +23,8 @@
 		A10000000000000000000010 /* PocketbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* PocketbookView.swift */; };
 		A10000000000000000000011 /* PocketbookGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* PocketbookGeometry.swift */; };
 		A10000000000000000000012 /* PocketbookSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* PocketbookSettings.swift */; };
+		A10000000000000000000013 /* NotchTerminalNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* NotchTerminalNative.swift */; };
+		A20000000000000000000001 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = J20000000000000000000001 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +46,7 @@
 		B10000000000000000000010 /* PocketbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookView.swift; sourceTree = "<group>"; };
 		B10000000000000000000011 /* PocketbookGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookGeometry.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* PocketbookSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookSettings.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* NotchTerminalNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchTerminalNative.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +54,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20000000000000000000001 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +74,7 @@
 			children = (
 				B10000000000000000000001 /* NotchShelfApp.swift */,
 				B10000000000000000000002 /* AppDelegate.swift */,
+				B10000000000000000000013 /* NotchTerminalNative.swift */,
 				B10000000000000000000003 /* ShelfCoordinator.swift */,
 				B10000000000000000000004 /* ShelfStore.swift */,
 				B10000000000000000000005 /* FinderBridge.swift */,
@@ -112,6 +117,9 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				J20000000000000000000001 /* SwiftTerm */,
+			);
 			name = NotchShelf;
 			productName = NotchShelf;
 			productReference = B1000000000000000000000B /* NotchShelf.app */;
@@ -141,6 +149,9 @@
 				Base,
 			);
 			mainGroup = D10000000000000000000001;
+			packageReferences = (
+				K20000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			productRefGroup = D10000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -167,6 +178,7 @@
 			files = (
 				A10000000000000000000001 /* NotchShelfApp.swift in Sources */,
 				A10000000000000000000002 /* AppDelegate.swift in Sources */,
+				A10000000000000000000013 /* NotchTerminalNative.swift in Sources */,
 				A10000000000000000000003 /* ShelfCoordinator.swift in Sources */,
 				A10000000000000000000004 /* ShelfStore.swift in Sources */,
 				A10000000000000000000005 /* FinderBridge.swift in Sources */,
@@ -297,6 +309,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		K20000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.19.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		J20000000000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = K20000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = G10000000000000000000001 /* Project object */;
 }
