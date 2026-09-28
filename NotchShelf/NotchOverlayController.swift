@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor
@@ -114,6 +115,133 @@ private final class NotchWindow: NSPanel {
     }
 }
 
+// MARK: - Primary notch surface ownership
+
+private enum NotchPrimarySurface: String {
+    case terminal
+    case pocketbook
+    case launcher
+
+    var hotKeySignature: OSType {
+        switch self {
+        case .terminal: return 0x4E535454 // NSTT
+        case .pocketbook: return 0x4E535033 // NSP3
+        case .launcher: return 0x4E534C41 // NSLA
+        }
+    }
+}
+
+/// Keeps the physical notch single-owner. Terminal, Pocketbook, and Launcher are
+/// primary surfaces and must replace one another instead of stacking NSPanels.
+/// Compact File Shelf / Drop Zone / terminal activity panels are intentionally
+/// excluded because they cannot become key windows.
+@MainActor
+private final class NotchSurfaceManager {
+    static let shared = NotchSurfaceManager()
+
+    private var keyObserver: NSObjectProtocol?
+    private weak var activeWindow: NSWindow?
+    private var activeSurface: NotchPrimarySurface?
+
+    private init() {}
+
+    func start() {
+        guard keyObserver == nil else { return }
+
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self,
+                      let window = note.object as? NSWindow else { return }
+                self.handleDidBecomeKey(window)
+            }
+        }
+    }
+
+    private func handleDidBecomeKey(_ window: NSWindow) {
+        guard let nextSurface = surface(for: window) else { return }
+
+        if let previousWindow = activeWindow,
+           previousWindow !== window,
+           let previousSurface = activeSurface,
+           previousWindow.isVisible {
+            // If the previous controller has not already started hiding, route the
+            // same Carbon hotkey it owns. That lets its normal hide() path clear
+            // key monitors, requestedVisible, animation state, and pending work.
+            if !previousWindow.ignoresMouseEvents {
+                let status = sendHotKey(to: previousSurface)
+                if status != noErr {
+                    NSLog(
+                        "[NotchShelf] Surface manager could not dismiss %@: %d",
+                        previousSurface.rawValue,
+                        status
+                    )
+                }
+            }
+
+            // hide() intentionally keeps the panel around for its closing animation.
+            // A surface switch must never visually stack, so remove the old panel now;
+            // its controller has already moved to the hidden state above.
+            previousWindow.orderOut(nil)
+
+            NSLog(
+                "[NotchShelf] Primary surface switched: %@ -> %@",
+                previousSurface.rawValue,
+                nextSurface.rawValue
+            )
+        }
+
+        activeWindow = window
+        activeSurface = nextSurface
+    }
+
+    private func surface(for window: NSWindow) -> NotchPrimarySurface? {
+        guard window.canBecomeKey else { return nil }
+
+        switch window.level.rawValue {
+        case NSWindow.Level.mainMenu.rawValue + 1:
+            return .terminal
+        case NSWindow.Level.mainMenu.rawValue + 2:
+            return .pocketbook
+        case NSWindow.Level.mainMenu.rawValue + 3:
+            return .launcher
+        default:
+            return nil
+        }
+    }
+
+    private func sendHotKey(to surface: NotchPrimarySurface) -> OSStatus {
+        var event: EventRef?
+        let createStatus = CreateEvent(
+            nil,
+            OSType(kEventClassKeyboard),
+            UInt32(kEventHotKeyPressed),
+            GetCurrentEventTime(),
+            EventAttributes(kEventAttributeNone),
+            &event
+        )
+        guard createStatus == noErr, let event else { return createStatus }
+        defer { ReleaseEvent(event) }
+
+        var identifier = EventHotKeyID(signature: surface.hotKeySignature, id: 1)
+        let setStatus = withUnsafePointer(to: &identifier) { pointer in
+            SetEventParameter(
+                event,
+                EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID),
+                MemoryLayout<EventHotKeyID>.size,
+                pointer
+            )
+        }
+        guard setStatus == noErr else { return setStatus }
+
+        return SendEventToEventTarget(event, GetApplicationEventTarget())
+    }
+}
+
 @MainActor
 final class NotchOverlayController {
     private static let minimumMovingPresentation: TimeInterval = 1.15
@@ -130,6 +258,7 @@ final class NotchOverlayController {
     private var lastLoggedGeometryKey: String?
 
     init() {
+        NotchSurfaceManager.shared.start()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenChanged),
