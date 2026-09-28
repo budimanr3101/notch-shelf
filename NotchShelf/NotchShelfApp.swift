@@ -22,8 +22,6 @@ struct NotchShelfApp: App {
         let migrationVersionKey = "NotchShelf.Terminal.shortcutMigrationVersion"
         let currentMigrationVersion = 1
 
-        // Migration is intentionally one-shot. Once a user has seen this migration,
-        // a later deliberate choice of an older shortcut must remain their choice.
         guard defaults.integer(forKey: migrationVersionKey) < currentMigrationVersion else {
             return
         }
@@ -182,6 +180,19 @@ final class NotchTerminalActivityController: ObservableObject {
                 self.scheduleTerminalCollapsed()
             }
         })
+        observers.append(center.addObserver(
+            forName: NSWindow.didOrderOffScreenNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self,
+                      let window = note.object as? NSWindow,
+                      self.isFullTerminalWindow(window) else { return }
+                self.terminalExpanded = false
+                self.refreshVisibility()
+            }
+        })
 
         if NSApp.isRunning {
             DispatchQueue.main.async { [weak self] in
@@ -205,8 +216,6 @@ final class NotchTerminalActivityController: ObservableObject {
             command: prettyCommand(command),
             startedAt: now
         )
-        // Never persist raw commands in the unified system log. Commands can contain
-        // credentials, tokens, signed URLs, and other secrets.
         NSLog("[NotchShelf] command started")
         refreshVisibility()
     }
@@ -322,6 +331,7 @@ final class NotchTerminalActivityController: ObservableObject {
     private func refreshVisibility() {
         guard presentation != nil,
               !terminalExpanded,
+              !hasVisibleFullTerminalWindow,
               !isAnotherNotchSurfaceVisible else {
             hidePanel()
             return
@@ -337,6 +347,12 @@ final class NotchTerminalActivityController: ObservableObject {
             && window.frame.width > 360
     }
 
+    private var hasVisibleFullTerminalWindow: Bool {
+        NSApp.windows.contains { window in
+            window.isVisible && isFullTerminalWindow(window)
+        }
+    }
+
     private var isAnotherNotchSurfaceVisible: Bool {
         let pocketbookLevel = NSWindow.Level.mainMenu.rawValue + 2
         return NSApp.windows.contains { window in
@@ -350,6 +366,7 @@ final class NotchTerminalActivityController: ObservableObject {
 
     private func showPanel() {
         guard presentation != nil,
+              !hasVisibleFullTerminalWindow,
               let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
             return
@@ -370,9 +387,7 @@ final class NotchTerminalActivityController: ObservableObject {
                 controller: self,
                 geometry: geometry,
                 metrics: metrics,
-                onOpen: { [weak self] in
-                    self?.openTerminal()
-                }
+                onOpen: { [weak self] in self?.openTerminal() }
             )
             panel?.identifier = Self.panelIdentifier
         }
