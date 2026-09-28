@@ -1,0 +1,283 @@
+name: macOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v, for example 0.1.0
+        required: true
+        default: 0.1.0
+        type: string
+      publish:
+        description: Publish a GitHub Release after signing and notarization
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build DMG
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      APP_NAME: NotchShelf
+      PROJECT: NotchShelf.xcodeproj
+      SCHEME: NotchShelf
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      MACOS_KEYCHAIN_PWD: ${{ secrets.MACOS_KEYCHAIN_PWD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            PUBLISH="true"
+          else
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+            PUBLISH="${{ inputs.publish }}"
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "$PUBLISH" == "true" && "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Public releases may only be published from main."
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "PUBLISH=$PUBLISH" >> "$GITHUB_ENV"
+          echo "DMG_NAME=${APP_NAME}-${VERSION}.dmg" >> "$GITHUB_ENV"
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DERIVED_DATA="$RUNNER_TEMP/NotchShelfDerivedData"
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/${APP_NAME}.app"
+          test -d "$APP_PATH"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Detect signing configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$MACOS_CERTIFICATE" && -n "$MACOS_CERTIFICATE_PWD" && -n "$MACOS_KEYCHAIN_PWD" ]]; then
+            echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
+          else
+            echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
+          fi
+
+          if [[ -n "$APPLE_ID" && -n "$APPLE_TEAM_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]]; then
+            echo "NOTARY_AVAILABLE=1" >> "$GITHUB_ENV"
+          else
+            echo "NOTARY_AVAILABLE=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Import Developer ID certificate
+        if: env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/notchshelf-signing.keychain-db"
+
+          printf '%s' "$MACOS_CERTIFICATE" | /usr/bin/base64 -D > "$CERT_PATH"
+
+          security create-keychain -p "$MACOS_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PWD" \
+            -A \
+            -t cert \
+            -f pkcs12
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$MACOS_KEYCHAIN_PWD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk '/Developer ID Application/ {print $2; exit}')"
+          if [[ -z "$SIGN_IDENTITY" ]]; then
+            echo "Developer ID Application identity was not found in the imported certificate."
+            exit 1
+          fi
+
+          echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign NotchShelf
+        if: env.SIGNING_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -d "$APP_PATH/Contents/Frameworks" ]]; then
+            while IFS= read -r -d '' nested_code; do
+              codesign \
+                --force \
+                --timestamp \
+                --options runtime \
+                --sign "$SIGN_IDENTITY" \
+                "$nested_code"
+            done < <(find "$APP_PATH/Contents/Frameworks" -depth \( -type d -name '*.framework' -o -type f -name '*.dylib' \) -print0)
+          fi
+
+          codesign \
+            --force \
+            --timestamp \
+            --options runtime \
+            --entitlements NotchShelf/NotchShelf.entitlements \
+            --sign "$SIGN_IDENTITY" \
+            "$APP_PATH"
+
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+      - name: Create DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG_ROOT="$RUNNER_TEMP/dmg-root"
+          DMG_PATH="$RUNNER_TEMP/$DMG_NAME"
+
+          rm -rf "$DMG_ROOT"
+          mkdir -p "$DMG_ROOT"
+          ditto "$APP_PATH" "$DMG_ROOT/${APP_NAME}.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+
+          hdiutil create \
+            -volname "$APP_NAME $VERSION" \
+            -srcfolder "$DMG_ROOT" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+
+          hdiutil verify "$DMG_PATH"
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize and staple DMG
+        if: env.SIGNING_AVAILABLE == '1' && env.NOTARY_AVAILABLE == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
+          echo "NOTARIZED=1" >> "$GITHUB_ENV"
+
+      - name: Mark non-notarized build
+        if: env.SIGNING_AVAILABLE != '1' || env.NOTARY_AVAILABLE != '1'
+        run: echo "NOTARIZED=0" >> "$GITHUB_ENV"
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotchShelf-${{ env.VERSION }}-dmg
+          path: |
+            ${{ env.DMG_PATH }}
+            ${{ env.DMG_PATH }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require signed and notarized public release
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$SIGNING_AVAILABLE" != "1" || "$NOTARIZED" != "1" ]]; then
+            echo "Refusing to publish an unsigned or non-notarized public release."
+            echo "Configure the Developer ID and Apple notarization secrets documented in docs/RELEASING.md."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG_PATH" "$DMG_PATH.sha256" --clobber
+          else
+            gh release create "$TAG" \
+              "$DMG_PATH" \
+              "$DMG_PATH.sha256" \
+              --target "$GITHUB_SHA" \
+              --title "NotchShelf $VERSION" \
+              --generate-notes
+          fi
+
+      - name: Clean signing keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
