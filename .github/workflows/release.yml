@@ -27,6 +27,8 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - 'NotchShelf/NotchShelf.entitlements'
+      - 'NotchShelf/Branding/**'
+      - 'tools/install-app-icon.sh'
       - 'docs/RELEASING.md'
       - 'README.md'
 
@@ -124,6 +126,12 @@ jobs:
           APP_PATH="$DERIVED_DATA/Build/Products/Release/${APP_NAME}.app"
           test -d "$APP_PATH"
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Install NotchShelf app icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/install-app-icon.sh "$APP_PATH"
 
       - name: Detect signing configuration
         shell: bash
