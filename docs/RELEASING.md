@@ -1,8 +1,9 @@
 # Releasing NotchShelf
 
-NotchShelf public releases are distributed as a Developer ID signed and Apple-notarized DMG through GitHub Releases.
+NotchShelf supports two macOS distribution modes:
 
-The release workflow also supports an unsigned DMG artifact for internal testing, but it deliberately refuses to publish that artifact as a public release.
+1. **Unsigned community release** — free, no Apple Developer Program required. The DMG can be published to GitHub Releases, but macOS may block the first launch until the user explicitly allows the app in System Settings → Privacy & Security.
+2. **Developer ID signed and Apple-notarized release** — preferred when Apple Developer credentials are available. The same workflow automatically uses signing and notarization when the required GitHub secrets exist.
 
 Public releases use the stable asset name `NotchShelf.dmg`. This keeps the README download URL stable across versions:
 
@@ -10,82 +11,62 @@ Public releases use the stable asset name `NotchShelf.dmg`. This keeps the READM
 https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg
 ```
 
-The GitHub Release tag and title still carry the actual version, for example `v0.1.0` and `NotchShelf 0.1.0`.
+The GitHub Release tag still carries the version, for example `v0.1.0`.
 
-## Prerequisites
+## Free unsigned release
 
-- An active Apple Developer Program membership.
-- A **Developer ID Application** certificate for the Apple Developer team used to distribute NotchShelf.
-- An Apple ID that can submit notarization requests for that team.
-- An app-specific password for that Apple ID.
+No Apple credentials are required.
 
-## GitHub Actions secrets
+The workflow will:
 
-Configure these repository secrets under **Settings → Secrets and variables → Actions**.
+1. Build NotchShelf in Release configuration.
+2. Create `NotchShelf.dmg` with an Applications shortcut.
+3. Verify the DMG with `hdiutil verify`.
+4. Generate `NotchShelf.dmg.sha256`.
+5. Upload the DMG as a GitHub Actions artifact.
+6. Publish a GitHub Release with an explicit **Unsigned Beta** warning and Gatekeeper instructions.
+
+Users may need to try opening NotchShelf once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm **Open**.
+
+## Optional signed and notarized release
+
+If you later join the Apple Developer Program, configure these repository secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Purpose |
 | --- | --- |
 | `MACOS_CERTIFICATE` | Base64-encoded `.p12` containing the Developer ID Application certificate and private key. |
 | `MACOS_CERTIFICATE_PWD` | Password used when exporting the `.p12`. |
-| `MACOS_KEYCHAIN_PWD` | Temporary password used for the CI signing keychain. Use a strong random value. |
+| `MACOS_KEYCHAIN_PWD` | Temporary password used for the CI signing keychain. |
 | `APPLE_ID` | Apple ID used for notarization. |
 | `APPLE_TEAM_ID` | Apple Developer Team ID. |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for `notarytool`. |
 
-### Export and encode the certificate
+When all required credentials are available, the workflow automatically:
 
-Export the **Developer ID Application** certificate and its private key from Keychain Access as a password-protected `.p12` file.
+1. Imports the Developer ID certificate into a temporary keychain.
+2. Signs embedded code and `NotchShelf.app`.
+3. Applies the Apple Events entitlement required for Finder automation.
+4. Submits the DMG to Apple notarization.
+5. Staples and validates the notarization ticket.
+6. Publishes the release without the unsigned-build warning.
 
-On macOS, encode it for the `MACOS_CERTIFICATE` secret:
+## Release trigger
 
-```bash
-base64 -i DeveloperIDApplication.p12 | pbcopy
-```
+The release version lives in `RELEASE_VERSION`.
 
-Paste the clipboard value into the GitHub secret. Do not commit the `.p12` file, private key, Apple ID password, or app-specific password to the repository.
+To publish a release from `main`, update `RELEASE_VERSION` to the intended version and update `RELEASE_TRIGGER` with a new value. A release-trigger push builds and publishes that version.
 
-## What the workflow does
+The workflow also supports manual runs from **Actions → macOS Release**.
 
-`.github/workflows/release.yml` performs the following steps:
+## Runtime testing
 
-1. Builds NotchShelf in Release configuration.
-2. Enables the Hardened Runtime for the release build.
-3. Imports the Developer ID certificate into a temporary CI keychain when signing secrets are available.
-4. Signs embedded frameworks and `NotchShelf.app`.
-5. Applies the Apple Events entitlement required for Finder automation.
-6. Creates `NotchShelf.dmg` with an Applications shortcut.
-7. Submits the DMG to Apple with `notarytool`.
-8. Staples and validates the notarization ticket.
-9. Generates `NotchShelf.dmg.sha256`.
-10. Uploads a versioned workflow artifact such as `NotchShelf-0.1.0-dmg` for testing.
-11. Publishes `NotchShelf.dmg` and its checksum to GitHub Releases only when signing and notarization succeeded.
+CI proves that the project builds and that the DMG can be packaged. It does not prove the notch UI or terminal works correctly on real hardware.
 
-## Recommended release sequence
-
-### 1. Prepare the release on a branch
-
-Update the version, release notes, README, or other release metadata as needed and let macOS CI pass.
-
-### 2. Merge the release preparation to `main`
-
-Do not publish directly from a feature branch. Manual public publishing is restricted to `main`.
-
-### 3. Build a non-public DMG first
-
-Open **Actions → macOS Release → Run workflow** on `main`.
-
-Use:
-
-- `version`: for example `0.1.0`
-- `publish`: **false**
-
-The workflow will build, sign, notarize, and upload the DMG as a workflow artifact without creating a public GitHub Release.
-
-Download that artifact and runtime-test it on a real Mac. At minimum verify:
+Before promoting a build broadly, test at minimum:
 
 - DMG opens normally.
 - Dragging NotchShelf into Applications works.
-- Gatekeeper accepts the application without an unsigned-app warning.
+- The Gatekeeper flow matches the documented unsigned-install instructions.
 - Finder Automation permission can be granted.
 - File Shelf `Cmd + X` / `Cmd + V` works.
 - Drop Zone works.
@@ -93,21 +74,6 @@ Download that artifact and runtime-test it on a real Mac. At minimum verify:
 - Native terminal input, Tab completion, history, `Ctrl + R`, `Ctrl + C`, `vi`/`nvim`/`less`, and shell startup files behave correctly.
 - The mini terminal activity does not appear while the full terminal remains visible.
 - Only one primary notch surface is visible at a time.
-
-CI build success is not a substitute for this real-Mac runtime test.
-
-### 4. Publish
-
-After the DMG passes runtime testing, run **macOS Release** again on `main` with the same version and:
-
-- `publish`: **true**
-
-The workflow creates the `v<version>` tag and GitHub Release if they do not already exist, then uploads:
-
-- `NotchShelf.dmg`
-- `NotchShelf.dmg.sha256`
-
-A tag push matching `v*` also triggers the release workflow and is treated as a publish request.
 
 ## Local checksum verification
 
@@ -119,17 +85,3 @@ cat NotchShelf.dmg.sha256
 ```
 
 The hashes should match.
-
-## Troubleshooting
-
-### `Developer ID Application identity was not found`
-
-The imported `.p12` does not contain a usable Developer ID Application certificate and private key, or the certificate has expired.
-
-### Notarization is rejected
-
-Open the failed GitHub Actions run and inspect the `notarytool` output. Common causes include signing problems, an expired certificate, missing hardened-runtime requirements, or invalid bundle contents.
-
-### Public release step refuses to run
-
-This is intentional if signing or notarization credentials are missing. Build with `publish: false` for an internal artifact, configure the required secrets, then rerun the workflow.
