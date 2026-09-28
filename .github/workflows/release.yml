@@ -14,8 +14,12 @@ on:
         default: false
         type: boolean
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+    paths:
+      - 'RELEASE_VERSION'
   pull_request:
     branches:
       - main
@@ -67,6 +71,11 @@ jobs:
             VERSION="$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' NotchShelf.xcodeproj/project.pbxproj | head -n 1 | tr -d '[:space:]')"
             TAG="v${VERSION}"
             PUBLISH="false"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            test -f RELEASE_VERSION
+            VERSION="$(tr -d '[:space:]' < RELEASE_VERSION)"
+            TAG="v${VERSION}"
+            PUBLISH="true"
           else
             VERSION="${{ inputs.version }}"
             TAG="v${VERSION}"
