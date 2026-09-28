@@ -16,6 +16,14 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release.yml'
+      - 'NotchShelf/NotchShelf.entitlements'
+      - 'docs/RELEASING.md'
+      - 'README.md'
 
 permissions:
   contents: write
@@ -55,6 +63,10 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
             VERSION="${TAG#v}"
             PUBLISH="true"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            VERSION="$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' NotchShelf.xcodeproj/project.pbxproj | head -n 1 | tr -d '[:space:]')"
+            TAG="v${VERSION}"
+            PUBLISH="false"
           else
             VERSION="${{ inputs.version }}"
             TAG="v${VERSION}"
@@ -107,6 +119,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "SIGNING_AVAILABLE=0" >> "$GITHUB_ENV"
+            echo "NOTARY_AVAILABLE=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
 
           if [[ -n "$MACOS_CERTIFICATE" && -n "$MACOS_CERTIFICATE_PWD" && -n "$MACOS_KEYCHAIN_PWD" ]]; then
             echo "SIGNING_AVAILABLE=1" >> "$GITHUB_ENV"
