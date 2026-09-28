@@ -10,14 +10,14 @@ final class NotchNativeTerminalState: ObservableObject {
     @Published var directoryLabel = "~"
 }
 
-private enum NotchNativeTerminalActivityEvent {
+fileprivate enum NotchNativeTerminalActivityEvent {
     case began(id: String, command: String)
     case finished(id: String, status: Int32)
 }
 
-/// SwiftTerm already owns the PTY and terminal parser. This subclass only watches
-/// NotchShelf's private OSC 777 messages as a side channel for the compact activity UI.
-private final class NotchShelfLocalTerminalView: LocalProcessTerminalView {
+/// SwiftTerm owns the PTY, keyboard input, ZLE, cursor, and VT rendering.
+/// This subclass only mirrors NotchShelf's private OSC 777 activity messages.
+fileprivate final class NotchShelfLocalTerminalView: LocalProcessTerminalView {
     var onActivityEvent: ((NotchNativeTerminalActivityEvent) -> Void)?
 
     private var oscState = 0
@@ -80,9 +80,9 @@ private final class NotchShelfLocalTerminalView: LocalProcessTerminalView {
 }
 
 @MainActor
-final class NotchNativeTerminalController: NSObject, LocalProcessTerminalViewDelegate {
+final class NotchNativeTerminalController: NSObject, @preconcurrency LocalProcessTerminalViewDelegate {
     let state = NotchNativeTerminalState()
-    let terminalView: NotchShelfLocalTerminalView
+    fileprivate let terminalView: NotchShelfLocalTerminalView
 
     private var configurationDirectory: URL?
     private var ignoreNextTermination = false
@@ -106,10 +106,6 @@ final class NotchNativeTerminalController: NSObject, LocalProcessTerminalViewDel
                 }
             }
         }
-    }
-
-    var isRunning: Bool {
-        terminalView.process.running
     }
 
     func ensureSession(at directory: URL) {
@@ -164,14 +160,13 @@ final class NotchNativeTerminalController: NSObject, LocalProcessTerminalViewDel
             environment["ZDOTDIR"] = configuration.path
             environment["LC_CTYPE"] = environment["LC_CTYPE"] ?? "UTF-8"
 
-            let values = environment.map { key, value in "\(key)=\(value)" }
             state.directoryLabel = displayDirectory(directory)
             state.sessionAlive = true
 
             terminalView.startProcess(
                 executable: "/bin/zsh",
                 args: [],
-                environment: values,
+                environment: environment.map { "\($0.key)=\($0.value)" },
                 execName: "-zsh",
                 currentDirectory: directory.path
             )
@@ -185,8 +180,7 @@ final class NotchNativeTerminalController: NSObject, LocalProcessTerminalViewDel
     private func makeZshConfiguration() throws -> URL {
         removeConfigurationDirectory()
 
-        let environment = ProcessInfo.processInfo.environment
-        let originalRoot = environment["ZDOTDIR"]
+        let originalRoot = ProcessInfo.processInfo.environment["ZDOTDIR"]
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         let configuration = FileManager.default.temporaryDirectory
             .appendingPathComponent("notchshelf-native-zsh-" + UUID().uuidString)
