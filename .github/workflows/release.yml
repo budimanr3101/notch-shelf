@@ -86,7 +86,7 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "PUBLISH=$PUBLISH" >> "$GITHUB_ENV"
-          echo "DMG_NAME=${APP_NAME}-${VERSION}.dmg" >> "$GITHUB_ENV"
+          echo "DMG_NAME=${APP_NAME}.dmg" >> "$GITHUB_ENV"
 
       - name: Show Xcode version
         run: xcodebuild -version
