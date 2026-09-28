@@ -1,0 +1,30 @@
+name: Native terminal migration
+
+on:
+  push:
+    branches:
+      - hardening/mvp-safety
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.message == 'chore: run native terminal migration'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/mvp-safety
+
+      - name: Apply native terminal migration
+        run: python3 scripts/native-terminal-migrate.py
+
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchShelf/AppDelegate.swift NotchShelf/NotchShelfApp.swift NotchShelf.xcodeproj/project.pbxproj
+          git commit -m "feat: use native SwiftTerm terminal"
+          git push origin HEAD:hardening/mvp-safety
