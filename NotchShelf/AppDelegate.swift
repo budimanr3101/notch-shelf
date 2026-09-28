@@ -634,7 +634,7 @@ private final class NotchTerminalShell {
             "-q",
             "/dev/null",
             "/bin/sh",
-            "-lc",
+            "-c",
             "stty rows 30 cols 100 -echo; exec /bin/zsh -l"
         ]
         process.currentDirectoryURL = directory
@@ -644,6 +644,8 @@ private final class NotchTerminalShell {
         environment["COLORTERM"] = "truecolor"
         environment["LINES"] = "30"
         environment["COLUMNS"] = "100"
+        // This app already owns the PTY and input bar; Kiro must not replace it.
+        environment["PROCESS_LAUNCHED_BY_Q"] = "1"
         environment["LC_CTYPE"] = environment["LC_CTYPE"] ?? "UTF-8"
         // Source the user's startup files, then install our hook before the first read.
         // A per-session ZDOTDIR keeps the user's configuration untouched.
@@ -670,6 +672,7 @@ private final class NotchTerminalShell {
                     return $result
                 }
                 add-zsh-hook precmd _notchshelf_done
+                printf '\\e]777;notchshelf;ready;0\\a'
                 """
             }
             try contents.write(to: configuration.appendingPathComponent(file), atomically: true, encoding: .utf8)
@@ -740,15 +743,24 @@ final class NotchTerminalModel: ObservableObject {
     private let sanitizer = NotchTerminalSanitizer()
     private let workingDirectoryProvider: () -> URL?
     private var sessionID = UUID()
+    private var shellReady = false
+    private var pendingInput: [String] = []
     private var history: [String] = []
     private var historyIndex: Int?
 
     init(workingDirectoryProvider: @escaping () -> URL?) {
         self.workingDirectoryProvider = workingDirectoryProvider
-        sanitizer.onCompletion = { id, status in
-            NotchTerminalActivityController.shared.finish(id: id, status: status)
+        sanitizer.onCompletion = { [weak self] id, status in
+            guard let self = self else { return }
+            if id == "ready" {
+                self.shellReady = true
+                let input = self.pendingInput
+                self.pendingInput.removeAll()
+                for line in input { self.shell.sendLine(line) }
+            } else {
+                NotchTerminalActivityController.shared.finish(id: id, status: status)
+            }
         }
-
     }
 
     private func connectSession(id: UUID) {
@@ -762,6 +774,8 @@ final class NotchTerminalModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self, self.sessionID == id else { return }
                 self.sessionAlive = false
+                self.shellReady = false
+                self.pendingInput.removeAll()
                 NotchTerminalActivityController.shared.finishSession(status: status)
                 self.appendPlain("\n[session ended: \(status)]\n")
             }
@@ -775,6 +789,8 @@ final class NotchTerminalModel: ObservableObject {
         }
 
         sessionID = UUID()
+        shellReady = false
+        pendingInput.removeAll()
         connectSession(id: sessionID)
         let directory = initialDirectory()
         directoryLabel = displayDirectory(directory)
@@ -803,6 +819,8 @@ final class NotchTerminalModel: ObservableObject {
 
     func stop() {
         sessionID = UUID()
+        shellReady = false
+        pendingInput.removeAll()
         shell.stop()
         sessionAlive = false
     }
@@ -817,7 +835,7 @@ final class NotchTerminalModel: ObservableObject {
         // Input entered while a command is already running may be a password or an
         // interactive prompt response. Send it to the PTY, but never persist it in history.
         if NotchTerminalActivityController.shared.isRunning {
-            shell.sendLine(value)
+            sendInput(value)
             return
         }
 
@@ -833,10 +851,20 @@ final class NotchTerminalModel: ObservableObject {
         // Single-quote shell data, never interpolate command text as shell syntax.
         let quoted = "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
         appendPlain("\n› " + value + "\n")
-        shell.sendLine("_notchshelf_id='" + id + "'; eval -- " + quoted + "; _notchshelf_done")
+        sendInput("_notchshelf_id='" + id + "'; eval -- " + quoted + "; _notchshelf_done")
+    }
+
+    private func sendInput(_ line: String) {
+        if shellReady { shell.sendLine(line) }
+        else { pendingInput.append(line) }
     }
 
     func interrupt() {
+        if !shellReady, !pendingInput.isEmpty {
+            pendingInput.removeAll()
+            NotchTerminalActivityController.shared.finishSession(status: 130)
+            return
+        }
         shell.interrupt()
     }
 
