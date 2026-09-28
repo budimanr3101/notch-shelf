@@ -23,6 +23,8 @@
 		A10000000000000000000010 /* PocketbookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* PocketbookView.swift */; };
 		A10000000000000000000011 /* PocketbookGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* PocketbookGeometry.swift */; };
 		A10000000000000000000012 /* PocketbookSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* PocketbookSettings.swift */; };
+		A10000000000000000000013 /* NativeTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* NativeTerminal.swift */; };
+		A10000000000000000000014 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = J10000000000000000000001 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +46,7 @@
 		B10000000000000000000010 /* PocketbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookView.swift; sourceTree = "<group>"; };
 		B10000000000000000000011 /* PocketbookGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookGeometry.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* PocketbookSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookSettings.swift; sourceTree = "<group>"; };
+		B10000000000000000000013 /* NativeTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTerminal.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +54,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000014 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +74,7 @@
 			children = (
 				B10000000000000000000001 /* NotchShelfApp.swift */,
 				B10000000000000000000002 /* AppDelegate.swift */,
+				B10000000000000000000013 /* NativeTerminal.swift */,
 				B10000000000000000000003 /* ShelfCoordinator.swift */,
 				B10000000000000000000004 /* ShelfStore.swift */,
 				B10000000000000000000005 /* FinderBridge.swift */,
@@ -113,6 +118,9 @@
 			dependencies = (
 			);
 			name = NotchShelf;
+			packageProductDependencies = (
+				J10000000000000000000001 /* SwiftTerm */,
+			);
 			productName = NotchShelf;
 			productReference = B1000000000000000000000B /* NotchShelf.app */;
 			productType = "com.apple.product-type.application";
@@ -141,6 +149,9 @@
 				Base,
 			);
 			mainGroup = D10000000000000000000001;
+			packageReferences = (
+				K10000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			productRefGroup = D10000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -167,6 +178,7 @@
 			files = (
 				A10000000000000000000001 /* NotchShelfApp.swift in Sources */,
 				A10000000000000000000002 /* AppDelegate.swift in Sources */,
+				A10000000000000000000013 /* NativeTerminal.swift in Sources */,
 				A10000000000000000000003 /* ShelfCoordinator.swift in Sources */,
 				A10000000000000000000004 /* ShelfStore.swift in Sources */,
 				A10000000000000000000005 /* FinderBridge.swift in Sources */,
@@ -276,6 +288,25 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		K10000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.19.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		J10000000000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = K10000000000000000000001 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		H10000000000000000000001 /* Build configuration list for PBXProject "NotchShelf" */ = {
