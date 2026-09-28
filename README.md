@@ -33,13 +33,14 @@ The interface is designed around the actual hardware notch rather than a generic
 1. Download [`NotchShelf.dmg`](https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg).
 2. Open the DMG.
 3. Drag **NotchShelf** into **Applications**.
-4. Launch NotchShelf from Applications.
-5. Allow Finder Automation when macOS asks for it.
+4. Try to launch NotchShelf from Applications.
+5. If macOS blocks the first launch, open **System Settings → Privacy & Security**, scroll down, click **Open Anyway** for NotchShelf, then confirm **Open**.
+6. Allow Finder Automation when macOS asks for it.
 
 NotchShelf runs as a menu bar utility, so it does not keep a normal Dock window open.
 
-> [!NOTE]
-> Public releases are intended to be Developer ID signed and Apple notarized before publication. Release builds should still be runtime-tested on a real Mac before being published.
+> [!WARNING]
+> Current free releases are **unsigned and not Apple-notarized**. macOS may warn that the developer cannot be verified or that Apple cannot check the app for malicious software. Only download NotchShelf from this official GitHub repository and verify the included SHA-256 checksum if you want to confirm the downloaded DMG matches the published artifact.
 
 ## Features
 
@@ -169,7 +170,7 @@ Issues and pull requests are welcome. For UI changes, please preserve the physic
 
 ## Release process
 
-Maintainer instructions for Developer ID signing, Apple notarization, DMG generation, checksums, and GitHub Releases are documented in [`docs/RELEASING.md`](docs/RELEASING.md).
+Maintainer instructions for unsigned community releases and optional Developer ID signing / Apple notarization are documented in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 CI passing means the project compiles successfully on GitHub's macOS runner. Interactive terminal behavior, notch placement, drag behavior, and other UI details still require real-Mac runtime testing before a public release.
 
