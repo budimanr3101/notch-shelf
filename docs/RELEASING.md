@@ -4,6 +4,14 @@ NotchShelf public releases are distributed as a Developer ID signed and Apple-no
 
 The release workflow also supports an unsigned DMG artifact for internal testing, but it deliberately refuses to publish that artifact as a public release.
 
+Public releases use the stable asset name `NotchShelf.dmg`. This keeps the README download URL stable across versions:
+
+```text
+https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg
+```
+
+The GitHub Release tag and title still carry the actual version, for example `v0.1.0` and `NotchShelf 0.1.0`.
+
 ## Prerequisites
 
 - An active Apple Developer Program membership.
@@ -45,12 +53,12 @@ Paste the clipboard value into the GitHub secret. Do not commit the `.p12` file,
 3. Imports the Developer ID certificate into a temporary CI keychain when signing secrets are available.
 4. Signs embedded frameworks and `NotchShelf.app`.
 5. Applies the Apple Events entitlement required for Finder automation.
-6. Creates `NotchShelf-<version>.dmg` with an Applications shortcut.
+6. Creates `NotchShelf.dmg` with an Applications shortcut.
 7. Submits the DMG to Apple with `notarytool`.
 8. Staples and validates the notarization ticket.
-9. Generates a SHA-256 checksum.
-10. Uploads the DMG as a workflow artifact.
-11. Publishes the DMG and checksum to GitHub Releases only when signing and notarization succeeded.
+9. Generates `NotchShelf.dmg.sha256`.
+10. Uploads a versioned workflow artifact such as `NotchShelf-0.1.0-dmg` for testing.
+11. Publishes `NotchShelf.dmg` and its checksum to GitHub Releases only when signing and notarization succeeded.
 
 ## Recommended release sequence
 
@@ -96,8 +104,8 @@ After the DMG passes runtime testing, run **macOS Release** again on `main` with
 
 The workflow creates the `v<version>` tag and GitHub Release if they do not already exist, then uploads:
 
-- `NotchShelf-<version>.dmg`
-- `NotchShelf-<version>.dmg.sha256`
+- `NotchShelf.dmg`
+- `NotchShelf.dmg.sha256`
 
 A tag push matching `v*` also triggers the release workflow and is treated as a publish request.
 
@@ -106,8 +114,8 @@ A tag push matching `v*` also triggers the release workflow and is treated as a 
 After downloading a release:
 
 ```bash
-shasum -a 256 NotchShelf-0.1.0.dmg
-cat NotchShelf-0.1.0.dmg.sha256
+shasum -a 256 NotchShelf.dmg
+cat NotchShelf.dmg.sha256
 ```
 
 The hashes should match.
