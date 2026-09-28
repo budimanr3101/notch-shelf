@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct FileMoveBatchResult {
@@ -14,26 +15,60 @@ final class FileMoveService {
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
             let manager = FileManager.default
+            let destination = destinationFolder.resolvingSymlinksInPath().standardizedFileURL
 
-            // Preflight all destination conflicts before moving anything.
+            // Preflight the entire batch before moving anything. A failure here must leave
+            // every source untouched.
+            var targetNames = Set<String>()
             for source in items {
-                let target = destinationFolder.appendingPathComponent(source.lastPathComponent)
-                if source.standardizedFileURL == target.standardizedFileURL {
-                    let result = FileMoveBatchResult(
+                let normalizedSource = source.resolvingSymlinksInPath().standardizedFileURL
+                let target = destination.appendingPathComponent(source.lastPathComponent)
+                    .standardizedFileURL
+                let collisionKey = source.lastPathComponent.folding(
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: Locale(identifier: "en_US_POSIX")
+                )
+
+                guard targetNames.insert(collisionKey).inserted else {
+                    self.complete(
                         moved: [],
                         remaining: items,
-                        errorMessage: "\(source.lastPathComponent) is already in this folder."
+                        errorMessage: "Two staged items would create the same destination name: \(source.lastPathComponent).",
+                        completion: completion
                     )
-                    DispatchQueue.main.async { completion(result) }
                     return
                 }
-                if manager.fileExists(atPath: target.path) {
-                    let result = FileMoveBatchResult(
+
+                if normalizedSource == target.resolvingSymlinksInPath().standardizedFileURL {
+                    self.complete(
                         moved: [],
                         remaining: items,
-                        errorMessage: "\(source.lastPathComponent) already exists in the destination."
+                        errorMessage: "\(source.lastPathComponent) is already in this folder.",
+                        completion: completion
                     )
-                    DispatchQueue.main.async { completion(result) }
+                    return
+                }
+
+                var isDirectory: ObjCBool = false
+                if manager.fileExists(atPath: normalizedSource.path, isDirectory: &isDirectory),
+                   isDirectory.boolValue,
+                   self.isDescendant(destination, of: normalizedSource) {
+                    self.complete(
+                        moved: [],
+                        remaining: items,
+                        errorMessage: "A folder cannot be moved into one of its own subfolders: \(source.lastPathComponent).",
+                        completion: completion
+                    )
+                    return
+                }
+
+                if manager.fileExists(atPath: target.path) {
+                    self.complete(
+                        moved: [],
+                        remaining: items,
+                        errorMessage: "\(source.lastPathComponent) already exists in the destination.",
+                        completion: completion
+                    )
                     return
                 }
             }
@@ -42,47 +77,117 @@ final class FileMoveService {
             var remaining = items
 
             for source in items {
-                let target = destinationFolder.appendingPathComponent(source.lastPathComponent)
+                let target = destination.appendingPathComponent(source.lastPathComponent)
+                    .standardizedFileURL
                 do {
                     try self.moveOne(source, to: target, fileManager: manager)
                     moved.append(source)
-                    remaining.removeAll { $0.standardizedFileURL == source.standardizedFileURL }
+                    remaining.removeAll {
+                        $0.resolvingSymlinksInPath().standardizedFileURL
+                            == source.resolvingSymlinksInPath().standardizedFileURL
+                    }
                 } catch {
-                    let result = FileMoveBatchResult(
+                    self.complete(
                         moved: moved,
                         remaining: remaining,
-                        errorMessage: error.localizedDescription
+                        errorMessage: error.localizedDescription,
+                        completion: completion
                     )
-                    DispatchQueue.main.async { completion(result) }
                     return
                 }
             }
 
-            let result = FileMoveBatchResult(moved: moved, remaining: [], errorMessage: nil)
-            DispatchQueue.main.async { completion(result) }
+            self.complete(moved: moved, remaining: [], errorMessage: nil, completion: completion)
         }
     }
 
     private func moveOne(_ source: URL, to target: URL, fileManager: FileManager) throws {
         do {
             try fileManager.moveItem(at: source, to: target)
+            return
         } catch {
-            // Cross-volume moves can fail as a rename. Copy first, then delete source only after copy succeeds.
-            do {
-                try fileManager.copyItem(at: source, to: target)
-            } catch {
-                // copyItem can leave a partial destination for folders; clean it before returning failure.
-                try? fileManager.removeItem(at: target)
+            guard isCrossDeviceError(error) else {
                 throw error
             }
+        }
 
-            do {
-                try fileManager.removeItem(at: source)
-            } catch {
-                // Don't leave an accidental duplicate if deleting the source failed.
-                try? fileManager.removeItem(at: target)
-                throw error
+        // Cross-volume fallback: copy to a unique temporary sibling first. Never copy
+        // directly to the final target and never delete a path we did not create.
+        let temporaryTarget = target.deletingLastPathComponent().appendingPathComponent(
+            ".notchshelf-move-\(UUID().uuidString)-\(target.lastPathComponent)"
+        )
+
+        do {
+            try fileManager.copyItem(at: source, to: temporaryTarget)
+        } catch {
+            try? fileManager.removeItem(at: temporaryTarget)
+            throw error
+        }
+
+        do {
+            guard !fileManager.fileExists(atPath: target.path) else {
+                throw FileMoveSafetyError.destinationAppeared(target.lastPathComponent)
             }
+            try fileManager.moveItem(at: temporaryTarget, to: target)
+        } catch {
+            try? fileManager.removeItem(at: temporaryTarget)
+            throw error
+        }
+
+        do {
+            try fileManager.removeItem(at: source)
+        } catch {
+            // Keep the verified destination copy. Duplication is safer than deleting the
+            // only good copy if source cleanup fails or is only partially successful.
+            throw FileMoveSafetyError.sourceCleanupFailed(
+                source.lastPathComponent,
+                underlying: error
+            )
+        }
+    }
+
+    private func isCrossDeviceError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(EXDEV) {
+            return true
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return isCrossDeviceError(underlying)
+        }
+        return false
+    }
+
+    private func isDescendant(_ candidate: URL, of ancestor: URL) -> Bool {
+        let candidatePath = candidate.resolvingSymlinksInPath().standardizedFileURL.path
+        let ancestorPath = ancestor.resolvingSymlinksInPath().standardizedFileURL.path
+        return candidatePath.hasPrefix(ancestorPath + "/")
+    }
+
+    private func complete(
+        moved: [URL],
+        remaining: [URL],
+        errorMessage: String?,
+        completion: @escaping @MainActor (FileMoveBatchResult) -> Void
+    ) {
+        let result = FileMoveBatchResult(
+            moved: moved,
+            remaining: remaining,
+            errorMessage: errorMessage
+        )
+        DispatchQueue.main.async { completion(result) }
+    }
+}
+
+private enum FileMoveSafetyError: LocalizedError {
+    case destinationAppeared(String)
+    case sourceCleanupFailed(String, underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .destinationAppeared(let name):
+            return "\(name) appeared in the destination while the move was in progress. No existing destination file was removed."
+        case .sourceCleanupFailed(let name, let underlying):
+            return "\(name) was copied to the destination, but the original could not be removed. The destination copy was kept for safety. \(underlying.localizedDescription)"
         }
     }
 }

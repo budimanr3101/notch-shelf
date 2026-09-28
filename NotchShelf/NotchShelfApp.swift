@@ -19,6 +19,17 @@ struct NotchShelfApp: App {
         let keyCodeKey = "NotchShelf.Terminal.keyCode"
         let modifiersKey = "NotchShelf.Terminal.modifiers"
         let labelKey = "NotchShelf.Terminal.keyLabel"
+        let migrationVersionKey = "NotchShelf.Terminal.shortcutMigrationVersion"
+        let currentMigrationVersion = 1
+
+        // Migration is intentionally one-shot. Once a user has seen this migration,
+        // a later deliberate choice of an older shortcut must remain their choice.
+        guard defaults.integer(forKey: migrationVersionKey) < currentMigrationVersion else {
+            return
+        }
+        defer {
+            defaults.set(currentMigrationVersion, forKey: migrationVersionKey)
+        }
 
         let hasSavedShortcut = defaults.object(forKey: keyCodeKey) != nil
             && defaults.object(forKey: modifiersKey) != nil
@@ -194,7 +205,9 @@ final class NotchTerminalActivityController: ObservableObject {
             command: prettyCommand(command),
             startedAt: now
         )
-        NSLog("[NotchShelf] command started: %@", command)
+        // Never persist raw commands in the unified system log. Commands can contain
+        // credentials, tokens, signed URLs, and other secrets.
+        NSLog("[NotchShelf] command started")
         refreshVisibility()
     }
 

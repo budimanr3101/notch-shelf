@@ -132,6 +132,7 @@ final class ShortcutMonitor {
     private var cutHotKey: EventHotKeyRef?
     private var pasteHotKey: EventHotKeyRef?
     private var activationObserver: NSObjectProtocol?
+    private var keyWindowObservers: [NSObjectProtocol] = []
     private var started = false
 
     var onCut: (() -> Void)?
@@ -192,6 +193,17 @@ final class ShortcutMonitor {
             }
         }
 
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            keyWindowObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.refreshRegistrations()
+                    }
+                }
+            )
+        }
+
         refreshRegistrations()
         NSLog("[NotchShelf] Hotkey monitor started with shared Carbon router")
     }
@@ -215,6 +227,10 @@ final class ShortcutMonitor {
             self.activationObserver = nil
         }
 
+        let center = NotificationCenter.default
+        keyWindowObservers.forEach { center.removeObserver($0) }
+        keyWindowObservers.removeAll()
+
         started = false
     }
 
@@ -222,8 +238,14 @@ final class ShortcutMonitor {
     ///
     /// Cmd+X is only registered while Finder is frontmost. Cmd+V is even narrower:
     /// it is only registered while Finder is frontmost AND the shelf contains files.
-    /// That means normal paste behavior remains untouched whenever the shelf is empty.
+    /// Both are suspended while a NotchShelf window owns keyboard focus.
     func refreshRegistrations() {
+        if let keyWindow = NSApp.keyWindow, keyWindow.isVisible {
+            unregisterCut()
+            unregisterPaste()
+            return
+        }
+
         let finderIsFrontmost = isFinderFrontmost?()
             ?? (NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder")
 
