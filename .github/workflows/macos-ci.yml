@@ -69,3 +69,27 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY='' \
             build
+
+      - name: Verify native app icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/SuperNotchDerivedData/Build/Products/Debug/SuperNotch.app"
+          INFO="$APP/Contents/Info.plist"
+          RESOURCES="$APP/Contents/Resources"
+
+          test -d "$APP"
+          test -s "$RESOURCES/Assets.car"
+
+          ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$INFO" 2>/dev/null || true)"
+          ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO" 2>/dev/null || true)"
+
+          if [[ "$ICON_NAME" != "AppIcon" && -z "$ICON_FILE" ]]; then
+            echo "SuperNotch app icon metadata is missing from the Debug bundle."
+            /usr/libexec/PlistBuddy -c 'Print' "$INFO"
+            exit 1
+          fi
+
+          echo "CFBundleIconName=${ICON_NAME:-<none>}"
+          echo "CFBundleIconFile=${ICON_FILE:-<none>}"
+          find "$RESOURCES" -maxdepth 1 -type f \( -name 'Assets.car' -o -name '*.icns' \) -print
