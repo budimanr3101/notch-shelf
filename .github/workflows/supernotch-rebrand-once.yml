@@ -20,14 +20,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebrand NotchShelf to SuperNotch
+      - name: Rebrand application code to SuperNotch
         shell: bash
         run: |
           set -euo pipefail
 
           python3 <<'PY'
           from pathlib import Path
-          import os
 
           root = Path('.')
           replacements = (
@@ -36,9 +35,15 @@ jobs:
               ('NOTCHSHELF', 'SUPERNOTCH'),
           )
 
-          # Rewrite every UTF-8 text file while leaving binary assets untouched.
+          def is_workflow(path: Path) -> bool:
+              parts = path.parts
+              return len(parts) >= 2 and parts[0] == '.github' and parts[1] == 'workflows'
+
+          # Rewrite all UTF-8 application/project/docs text. Workflow files are
+          # intentionally handled separately because GITHUB_TOKEN cannot push
+          # workflow changes without the workflows permission.
           for path in sorted(root.rglob('*')):
-              if not path.is_file() or '.git' in path.parts:
+              if not path.is_file() or '.git' in path.parts or is_workflow(path):
                   continue
               try:
                   data = path.read_text(encoding='utf-8')
@@ -52,10 +57,9 @@ jobs:
               if updated != data:
                   path.write_text(updated, encoding='utf-8')
 
-          # Rename files/directories from deepest path to shallowest so project,
-          # scheme, source folder, Swift files, and entitlements all follow the brand.
+          # Rename application/project paths from deepest to shallowest.
           paths = sorted(
-              [p for p in root.rglob('*') if '.git' not in p.parts],
+              [p for p in root.rglob('*') if '.git' not in p.parts and not is_workflow(p)],
               key=lambda p: len(p.parts),
               reverse=True,
           )
@@ -73,15 +77,23 @@ jobs:
               path.rename(target)
           PY
 
-          echo 'Checking for stale application-brand identifiers...'
-          if git grep -n -I -e 'NotchShelf' -e 'notchshelf' -e 'NOTCHSHELF' -- . ':!RELEASE_TRIGGER*'; then
+          echo 'Checking application code for stale brand identifiers...'
+          if git grep -n -I \
+            -e 'NotchShelf' -e 'notchshelf' -e 'NOTCHSHELF' \
+            -- . ':!.github/workflows/**' ':!RELEASE_TRIGGER*'; then
             echo 'Found stale NotchShelf branding after rebrand.' >&2
             exit 1
           fi
 
-          if find . -path './.git' -prune -o -name '*NotchShelf*' -print | grep -q .; then
+          if find . \
+            -path './.git' -prune -o \
+            -path './.github/workflows' -prune -o \
+            -name '*NotchShelf*' -print | grep -q .; then
             echo 'Found stale NotchShelf path names after rebrand.' >&2
-            find . -path './.git' -prune -o -name '*NotchShelf*' -print
+            find . \
+              -path './.git' -prune -o \
+              -path './.github/workflows' -prune -o \
+              -name '*NotchShelf*' -print
             exit 1
           fi
 
@@ -93,7 +105,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add -A -- ':!.github/workflows/**'
           git diff --cached --check
           git commit -m 'refactor: rebrand NotchShelf to SuperNotch'
           git push origin HEAD:branding/supernotch
