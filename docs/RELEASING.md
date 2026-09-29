@@ -11,7 +11,11 @@ Public releases use the stable asset name `SuperNotch.dmg`. This keeps the READM
 https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg
 ```
 
-The GitHub Release tag still carries the version, for example `v0.1.0`.
+The GitHub Release tag still carries the version, for example `v0.2.0`.
+
+## App icon
+
+The official SN monogram icon is compiled natively from `SuperNotch/Assets.xcassets/AppIcon.appiconset`. The Xcode target uses `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`, so local Debug builds and packaged Release builds use the same asset catalog. CI verifies the compiled `Assets.car` and bundle icon metadata before a DMG is accepted.
 
 ## Free unsigned release
 
@@ -19,12 +23,13 @@ No Apple credentials are required.
 
 The workflow will:
 
-1. Build SuperNotch in Release configuration.
-2. Create `SuperNotch.dmg` with an Applications shortcut.
-3. Verify the DMG with `hdiutil verify`.
-4. Generate `SuperNotch.dmg.sha256`.
-5. Upload the DMG as a GitHub Actions artifact.
-6. Publish a GitHub Release with an explicit **Unsigned Beta** warning and Gatekeeper instructions.
+1. Build SuperNotch in Release configuration, including the native AppIcon asset catalog.
+2. Verify the compiled app icon metadata.
+3. Create `SuperNotch.dmg` with an Applications shortcut.
+4. Verify the DMG with `hdiutil verify`.
+5. Generate `SuperNotch.dmg.sha256`.
+6. Upload the DMG as a GitHub Actions artifact.
+7. Publish a GitHub Release with an explicit **Unsigned Beta** warning and Gatekeeper instructions.
 
 Users may need to try opening SuperNotch once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm **Open**.
 
@@ -60,10 +65,11 @@ The workflow also supports manual runs from **Actions → macOS Release**.
 
 ## Runtime testing
 
-CI proves that the project builds and that the DMG can be packaged. It does not prove the notch UI or terminal works correctly on real hardware.
+CI proves that the project builds, the app icon is compiled into the bundle, and the DMG can be packaged. It does not prove the notch UI or terminal works correctly on real hardware.
 
 Before promoting a build broadly, test at minimum:
 
+- SuperNotch shows the SN monogram icon in Xcode/local builds, Finder, and the mounted DMG.
 - DMG opens normally.
 - Dragging SuperNotch into Applications works.
 - The Gatekeeper flow matches the documented unsigned-install instructions.
