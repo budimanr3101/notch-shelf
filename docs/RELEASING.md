@@ -8,7 +8,7 @@ SuperNotch supports two macOS distribution modes:
 Public releases use the stable asset name `SuperNotch.dmg`. This keeps the README download URL stable across versions:
 
 ```text
-https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg
+https://github.com/budimanr3101/supernotch/releases/latest/download/SuperNotch.dmg
 ```
 
 The GitHub Release tag still carries the version, for example `v0.2.0`.
