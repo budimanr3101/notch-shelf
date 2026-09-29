@@ -26,8 +26,8 @@ on:
       - main
     paths:
       - '.github/workflows/release.yml'
-      - 'NotchShelf/NotchShelf.entitlements'
-      - 'NotchShelf/Branding/**'
+      - 'SuperNotch/SuperNotch.entitlements'
+      - 'SuperNotch/Branding/**'
       - 'tools/install-app-icon.sh'
       - 'docs/RELEASING.md'
       - 'README.md'
@@ -45,9 +45,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      APP_NAME: NotchShelf
-      PROJECT: NotchShelf.xcodeproj
-      SCHEME: NotchShelf
+      APP_NAME: SuperNotch
+      PROJECT: SuperNotch.xcodeproj
+      SCHEME: SuperNotch
       MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
       MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
       MACOS_KEYCHAIN_PWD: ${{ secrets.MACOS_KEYCHAIN_PWD }}
@@ -71,7 +71,7 @@ jobs:
             VERSION="${TAG#v}"
             PUBLISH="true"
           elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            VERSION="$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' NotchShelf.xcodeproj/project.pbxproj | head -n 1 | tr -d '[:space:]')"
+            VERSION="$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' SuperNotch.xcodeproj/project.pbxproj | head -n 1 | tr -d '[:space:]')"
             TAG="v${VERSION}"
             PUBLISH="false"
           elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == "refs/heads/main" ]]; then
@@ -108,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DERIVED_DATA="$RUNNER_TEMP/NotchShelfDerivedData"
+          DERIVED_DATA="$RUNNER_TEMP/SuperNotchDerivedData"
           xcodebuild \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -127,7 +127,7 @@ jobs:
           test -d "$APP_PATH"
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
-      - name: Install NotchShelf app icon
+      - name: Install SuperNotch app icon
         shell: bash
         run: |
           set -euo pipefail
@@ -163,7 +163,7 @@ jobs:
           set -euo pipefail
 
           CERT_PATH="$RUNNER_TEMP/developer-id.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/notchshelf-signing.keychain-db"
+          KEYCHAIN_PATH="$RUNNER_TEMP/supernotch-signing.keychain-db"
 
           printf '%s' "$MACOS_CERTIFICATE" | /usr/bin/base64 -D > "$CERT_PATH"
 
@@ -192,7 +192,7 @@ jobs:
           echo "SIGN_IDENTITY=$SIGN_IDENTITY" >> "$GITHUB_ENV"
           echo "SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
-      - name: Sign NotchShelf
+      - name: Sign SuperNotch
         if: env.SIGNING_AVAILABLE == '1'
         shell: bash
         run: |
@@ -213,7 +213,7 @@ jobs:
             --force \
             --timestamp \
             --options runtime \
-            --entitlements NotchShelf/NotchShelf.entitlements \
+            --entitlements SuperNotch/SuperNotch.entitlements \
             --sign "$SIGN_IDENTITY" \
             "$APP_PATH"
 
@@ -272,7 +272,7 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NotchShelf-${{ env.VERSION }}-dmg
+          name: SuperNotch-${{ env.VERSION }}-dmg
           path: |
             ${{ env.DMG_PATH }}
             ${{ env.DMG_PATH }}.sha256
@@ -290,33 +290,33 @@ jobs:
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
 
           if [[ "$NOTARIZED" == "1" ]]; then
-            TITLE="NotchShelf $VERSION"
+            TITLE="SuperNotch $VERSION"
             cat > "$NOTES_FILE" <<EOF
-          # NotchShelf $VERSION
+          # SuperNotch $VERSION
 
           This build is Developer ID signed and Apple notarized.
 
           ## Install
-          1. Download \`NotchShelf.dmg\`.
+          1. Download \`SuperNotch.dmg\`.
           2. Open the DMG.
-          3. Drag NotchShelf to Applications.
-          4. Launch NotchShelf.
+          3. Drag SuperNotch to Applications.
+          4. Launch SuperNotch.
           EOF
           else
-            TITLE="NotchShelf $VERSION (Unsigned Beta)"
+            TITLE="SuperNotch $VERSION (Unsigned Beta)"
             cat > "$NOTES_FILE" <<EOF
-          # NotchShelf $VERSION
+          # SuperNotch $VERSION
 
           > [!WARNING]
           > This is an unsigned and non-notarized community build. macOS may block the first launch because Apple cannot verify the developer or notarize this build.
 
           ## Install
-          1. Download \`NotchShelf.dmg\` from this release.
-          2. Open the DMG and drag NotchShelf to Applications.
-          3. Try to launch NotchShelf once.
-          4. If macOS blocks it, open **System Settings → Privacy & Security**, scroll down, choose **Open Anyway** for NotchShelf, then confirm **Open**.
+          1. Download \`SuperNotch.dmg\` from this release.
+          2. Open the DMG and drag SuperNotch to Applications.
+          3. Try to launch SuperNotch once.
+          4. If macOS blocks it, open **System Settings → Privacy & Security**, scroll down, choose **Open Anyway** for SuperNotch, then confirm **Open**.
 
-          Only download NotchShelf from this official GitHub repository. A SHA-256 checksum is included with the release.
+          Only download SuperNotch from this official GitHub repository. A SHA-256 checksum is included with the release.
           EOF
           fi
 
