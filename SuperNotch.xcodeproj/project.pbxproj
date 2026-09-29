@@ -24,6 +24,7 @@
 		A10000000000000000000011 /* PocketbookGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* PocketbookGeometry.swift */; };
 		A10000000000000000000012 /* PocketbookSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* PocketbookSettings.swift */; };
 		A10000000000000000000013 /* NotchTerminalNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* NotchTerminalNative.swift */; };
+		A10000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* Assets.xcassets */; };
 		A20000000000000000000001 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = J20000000000000000000001 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
@@ -47,6 +48,7 @@
 		B10000000000000000000011 /* PocketbookGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookGeometry.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* PocketbookSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookSettings.swift; sourceTree = "<group>"; };
 		B10000000000000000000013 /* NotchTerminalNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchTerminalNative.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +91,7 @@
 				B10000000000000000000010 /* PocketbookView.swift */,
 				B10000000000000000000011 /* PocketbookGeometry.swift */,
 				B10000000000000000000012 /* PocketbookSettings.swift */,
+				B10000000000000000000014 /* Assets.xcassets */,
 				B1000000000000000000000A /* Info.plist */,
 			);
 			path = SuperNotch;
@@ -166,6 +169,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000014 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -246,6 +250,7 @@
 		I10000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
@@ -268,6 +273,7 @@
 		I10000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
