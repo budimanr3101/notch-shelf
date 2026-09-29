@@ -7,14 +7,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml"><img src="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml/badge.svg" alt="macOS CI"></a>
+  <a href="https://github.com/budimanr3101/supernotch/actions/workflows/macos-ci.yml"><img src="https://github.com/budimanr3101/supernotch/actions/workflows/macos-ci.yml/badge.svg" alt="macOS CI"></a>
   <img src="https://img.shields.io/badge/macOS-15%2B-black.svg?logo=apple" alt="macOS 15+">
   <img src="https://img.shields.io/badge/Swift-SwiftUI-black.svg?logo=swift" alt="Swift / SwiftUI">
-  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest"><img src="https://img.shields.io/github/v/release/budimanr3101/notch-shelf?display_name=tag&label=release&color=black" alt="Latest Release"></a>
+  <a href="https://github.com/budimanr3101/supernotch/releases/latest"><img src="https://img.shields.io/github/v/release/budimanr3101/supernotch?display_name=tag&label=release&color=black" alt="Latest Release"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-SuperNotch.dmg-black?style=for-the-badge&logo=apple" alt="Download SuperNotch for macOS"></a>
+  <a href="https://github.com/budimanr3101/supernotch/releases/latest/download/SuperNotch.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-SuperNotch.dmg-black?style=for-the-badge&logo=apple" alt="Download SuperNotch for macOS"></a>
 </p>
 
 **SuperNotch** is a native macOS utility that turns the physical MacBook notch into a compact workspace. Stage and move Finder files, launch developer projects, keep Kubernetes and DevOps references nearby, and open a real Zsh terminal directly from the top of your screen.
@@ -30,7 +30,7 @@ Unlike a detached floating pill, SuperNotch is designed around the real display 
 - macOS 15 or later
 - A MacBook with a physical display notch is recommended
 
-1. Download [`SuperNotch.dmg`](https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg).
+1. Download [`SuperNotch.dmg`](https://github.com/budimanr3101/supernotch/releases/latest/download/SuperNotch.dmg).
 2. Open the DMG.
 3. Drag **SuperNotch** into **Applications**.
 4. Try to launch SuperNotch from Applications.
@@ -153,8 +153,8 @@ SuperNotch is designed to keep file and terminal activity local.
 - Xcode 16+
 
 ```bash
-git clone https://github.com/budimanr3101/notch-shelf.git
-cd notch-shelf
+git clone https://github.com/budimanr3101/supernotch.git
+cd supernotch
 open SuperNotch.xcodeproj
 ```
 
