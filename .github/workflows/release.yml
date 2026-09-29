@@ -26,9 +26,10 @@ on:
       - main
     paths:
       - '.github/workflows/release.yml'
+      - 'SuperNotch.xcodeproj/**'
       - 'SuperNotch/SuperNotch.entitlements'
+      - 'SuperNotch/Assets.xcassets/**'
       - 'SuperNotch/Branding/**'
-      - 'tools/install-app-icon.sh'
       - 'docs/RELEASING.md'
       - 'README.md'
 
@@ -127,11 +128,27 @@ jobs:
           test -d "$APP_PATH"
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
-      - name: Install SuperNotch app icon
+      - name: Verify native SuperNotch app icon
         shell: bash
         run: |
           set -euo pipefail
-          bash tools/install-app-icon.sh "$APP_PATH"
+          INFO="$APP_PATH/Contents/Info.plist"
+          RESOURCES="$APP_PATH/Contents/Resources"
+
+          test -s "$RESOURCES/Assets.car"
+
+          ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$INFO" 2>/dev/null || true)"
+          ICON_FILE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO" 2>/dev/null || true)"
+
+          if [[ "$ICON_NAME" != "AppIcon" && -z "$ICON_FILE" ]]; then
+            echo "SuperNotch app icon metadata is missing from the Release bundle."
+            /usr/libexec/PlistBuddy -c 'Print' "$INFO"
+            exit 1
+          fi
+
+          echo "CFBundleIconName=${ICON_NAME:-<none>}"
+          echo "CFBundleIconFile=${ICON_FILE:-<none>}"
+          find "$RESOURCES" -maxdepth 1 -type f \( -name 'Assets.car' -o -name '*.icns' \) -print
 
       - name: Detect signing configuration
         shell: bash
