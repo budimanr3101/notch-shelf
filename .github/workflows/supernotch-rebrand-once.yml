@@ -1,0 +1,99 @@
+name: SuperNotch one-shot rebrand
+
+on:
+  push:
+    branches:
+      - branding/supernotch
+
+permissions:
+  contents: write
+
+jobs:
+  rebrand:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebrand NotchShelf to SuperNotch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+          import os
+
+          root = Path('.')
+          replacements = (
+              ('NotchShelf', 'SuperNotch'),
+              ('notchshelf', 'supernotch'),
+              ('NOTCHSHELF', 'SUPERNOTCH'),
+          )
+
+          # Rewrite every UTF-8 text file while leaving binary assets untouched.
+          for path in sorted(root.rglob('*')):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              try:
+                  data = path.read_text(encoding='utf-8')
+              except (UnicodeDecodeError, OSError):
+                  continue
+
+              updated = data
+              for old, new in replacements:
+                  updated = updated.replace(old, new)
+
+              if updated != data:
+                  path.write_text(updated, encoding='utf-8')
+
+          # Rename files/directories from deepest path to shallowest so project,
+          # scheme, source folder, Swift files, and entitlements all follow the brand.
+          paths = sorted(
+              [p for p in root.rglob('*') if '.git' not in p.parts],
+              key=lambda p: len(p.parts),
+              reverse=True,
+          )
+          for path in paths:
+              name = path.name
+              new_name = name
+              for old, new in replacements:
+                  new_name = new_name.replace(old, new)
+              if new_name == name:
+                  continue
+
+              target = path.with_name(new_name)
+              if target.exists():
+                  raise RuntimeError(f'rename collision: {path} -> {target}')
+              path.rename(target)
+          PY
+
+          echo 'Checking for stale application-brand identifiers...'
+          if git grep -n -I -e 'NotchShelf' -e 'notchshelf' -e 'NOTCHSHELF' -- . ':!RELEASE_TRIGGER*'; then
+            echo 'Found stale NotchShelf branding after rebrand.' >&2
+            exit 1
+          fi
+
+          if find . -path './.git' -prune -o -name '*NotchShelf*' -print | grep -q .; then
+            echo 'Found stale NotchShelf path names after rebrand.' >&2
+            find . -path './.git' -prune -o -name '*NotchShelf*' -print
+            exit 1
+          fi
+
+          git status --short
+
+      - name: Commit SuperNotch rebrand
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor: rebrand NotchShelf to SuperNotch'
+          git push origin HEAD:branding/supernotch
