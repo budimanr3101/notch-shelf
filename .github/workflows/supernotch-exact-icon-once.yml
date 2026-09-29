@@ -1,11 +1,12 @@
-name: SuperNotch exact icon generation
+name: SuperNotch selected icon finalize
 
 on:
   push:
     branches:
       - branding/supernotch
     paths:
-      - 'SuperNotch/Branding/AppIcon.png'
+      - 'SuperNotch/Branding/AppIcon.webp'
+      - '.github/workflows/supernotch-exact-icon-once.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,19 +23,33 @@ jobs:
           ref: branding/supernotch
           fetch-depth: 0
 
-      - name: Generate native AppIcon set from selected artwork
+      - name: Build valid native AppIcon set from selected artwork
         shell: bash
         run: |
           set -euo pipefail
-          SRC='SuperNotch/Branding/AppIcon.png'
+
+          SRC='SuperNotch/Branding/AppIcon.webp'
+          MASTER='SuperNotch/Branding/AppIcon.png'
           DEST='SuperNotch/Assets.xcassets/AppIcon.appiconset'
+
           test -s "$SRC"
           mkdir -p "$DEST"
+
+          # Convert the selected artwork through macOS ImageIO so the committed
+          # master is a real PNG, not base64/text disguised as a .png file.
+          sips -s format png "$SRC" --out "$MASTER" >/dev/null
+          file "$MASTER" | grep -q 'PNG image data'
+
+          width="$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/ {print $2}')"
+          height="$(sips -g pixelHeight "$MASTER" | awk '/pixelHeight/ {print $2}')"
+          test "$width" = '1024'
+          test "$height" = '1024'
 
           generate() {
             local px="$1"
             local name="$2"
-            sips -z "$px" "$px" "$SRC" --out "$DEST/$name" >/dev/null
+            sips -z "$px" "$px" "$MASTER" --out "$DEST/$name" >/dev/null
+            file "$DEST/$name" | grep -q 'PNG image data'
           }
 
           generate 16 icon_16x16.png
@@ -48,18 +63,18 @@ jobs:
           generate 512 icon_512x512.png
           generate 1024 icon_512x512@2x.png
 
-          sips -g pixelWidth -g pixelHeight "$DEST/icon_512x512@2x.png"
+          test "$(sips -g pixelWidth "$DEST/icon_512x512@2x.png" | awk '/pixelWidth/ {print $2}')" = '1024'
+          test "$(sips -g pixelHeight "$DEST/icon_512x512@2x.png" | awk '/pixelHeight/ {print $2}')" = '1024'
 
-      - name: Commit exact native icon assets
+      - name: Commit selected icon and remove one-shot staging
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add SuperNotch/Assets.xcassets/AppIcon.appiconset
-          if git diff --cached --quiet; then
-            echo 'No icon changes to commit.'
-            exit 0
-          fi
-          git commit -m 'chore: use selected SuperNotch icon artwork'
+
+          git add SuperNotch/Branding/AppIcon.png SuperNotch/Assets.xcassets/AppIcon.appiconset
+          git rm -f SuperNotch/Branding/AppIcon.webp .github/workflows/supernotch-exact-icon-once.yml
+
+          git commit -m 'fix: install selected SuperNotch icon artwork'
           git push origin HEAD:branding/supernotch
