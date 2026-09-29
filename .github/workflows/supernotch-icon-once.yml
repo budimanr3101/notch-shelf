@@ -1,0 +1,281 @@
+name: SuperNotch icon generation
+
+on:
+  push:
+    branches:
+      - branding/supernotch
+    paths:
+      - '.github/workflows/supernotch-icon-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-icon:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate SuperNotch SN monogram icon
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > "$RUNNER_TEMP/GenerateSuperNotchIcon.swift" <<'SWIFT'
+          import AppKit
+          import CoreGraphics
+
+          let size = NSSize(width: 1024, height: 1024)
+          let canvas = NSImage(size: size)
+
+          func color(_ hex: UInt32, alpha: CGFloat = 1) -> NSColor {
+              NSColor(
+                  calibratedRed: CGFloat((hex >> 16) & 0xff) / 255,
+                  green: CGFloat((hex >> 8) & 0xff) / 255,
+                  blue: CGFloat(hex & 0xff) / 255,
+                  alpha: alpha
+              )
+          }
+
+          func drawGradientText(
+              _ text: String,
+              font: NSFont,
+              at point: NSPoint,
+              colors: [NSColor],
+              shadowColor: NSColor,
+              shadowBlur: CGFloat
+          ) {
+              let mask = NSImage(size: size)
+              mask.lockFocus()
+              NSColor.clear.setFill()
+              NSRect(origin: .zero, size: size).fill()
+              let paragraph = NSMutableParagraphStyle()
+              paragraph.alignment = .left
+              let attrs: [NSAttributedString.Key: Any] = [
+                  .font: font,
+                  .foregroundColor: NSColor.white,
+                  .paragraphStyle: paragraph
+              ]
+              NSAttributedString(string: text, attributes: attrs).draw(at: point)
+              mask.unlockFocus()
+
+              var proposed = NSRect(origin: .zero, size: size)
+              guard let cgMask = mask.cgImage(forProposedRect: &proposed, context: nil, hints: nil),
+                    let ctx = NSGraphicsContext.current?.cgContext else { return }
+
+              ctx.saveGState()
+              let shadow = NSShadow()
+              shadow.shadowColor = shadowColor
+              shadow.shadowBlurRadius = shadowBlur
+              shadow.shadowOffset = NSSize(width: 0, height: -8)
+              shadow.set()
+              ctx.clip(to: CGRect(origin: .zero, size: size), mask: cgMask)
+
+              let cgColors = colors.map { $0.cgColor } as CFArray
+              let locations: [CGFloat]
+              if colors.count == 3 {
+                  locations = [0, 0.48, 1]
+              } else {
+                  locations = [0, 1]
+              }
+              let gradient = CGGradient(
+                  colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                  colors: cgColors,
+                  locations: locations
+              )!
+              ctx.drawLinearGradient(
+                  gradient,
+                  start: CGPoint(x: 150, y: 700),
+                  end: CGPoint(x: 850, y: 250),
+                  options: []
+              )
+              ctx.restoreGState()
+          }
+
+          canvas.lockFocus()
+          NSColor.clear.setFill()
+          NSRect(origin: .zero, size: size).fill()
+
+          let outerRect = NSRect(x: 25, y: 25, width: 974, height: 974)
+          let outer = NSBezierPath(roundedRect: outerRect, xRadius: 205, yRadius: 205)
+          outer.addClip()
+
+          NSGradient(colors: [
+              color(0x263653),
+              color(0x0B111D),
+              color(0x020409)
+          ])!.draw(in: outer, angle: -62)
+
+          // Glossy glass reflection across the upper-right surface.
+          let reflection = NSBezierPath(ovalIn: NSRect(x: 115, y: 570, width: 980, height: 520))
+          NSGradient(colors: [
+              color(0xFFFFFF, alpha: 0.24),
+              color(0xB7D0FF, alpha: 0.055),
+              color(0xFFFFFF, alpha: 0.0)
+          ])!.draw(in: reflection, angle: -74)
+
+          // Subtle lower glass sweep.
+          let lower = NSBezierPath(ovalIn: NSRect(x: 365, y: -250, width: 850, height: 600))
+          color(0x6E8BC4, alpha: 0.12).setFill()
+          lower.fill()
+
+          NSGraphicsContext.restoreGraphicsState()
+
+          // Metallic outer rim.
+          let rim = NSBezierPath(roundedRect: outerRect, xRadius: 205, yRadius: 205)
+          rim.lineWidth = 12
+          color(0x4C638B, alpha: 0.72).setStroke()
+          rim.stroke()
+          let innerRim = NSBezierPath(roundedRect: NSRect(x: 37, y: 37, width: 950, height: 950), xRadius: 194, yRadius: 194)
+          innerRim.lineWidth = 3
+          color(0xA8C7FF, alpha: 0.34).setStroke()
+          innerRim.stroke()
+
+          // Hardware-notch cutout, open against the top edge.
+          let notch = NSBezierPath()
+          notch.move(to: NSPoint(x: 300, y: 1005))
+          notch.line(to: NSPoint(x: 724, y: 1005))
+          notch.curve(
+              to: NSPoint(x: 676, y: 835),
+              controlPoint1: NSPoint(x: 720, y: 918),
+              controlPoint2: NSPoint(x: 714, y: 840)
+          )
+          notch.curve(
+              to: NSPoint(x: 348, y: 835),
+              controlPoint1: NSPoint(x: 600, y: 820),
+              controlPoint2: NSPoint(x: 424, y: 820)
+          )
+          notch.curve(
+              to: NSPoint(x: 300, y: 1005),
+              controlPoint1: NSPoint(x: 310, y: 840),
+              controlPoint2: NSPoint(x: 304, y: 918)
+          )
+          notch.close()
+          color(0x01030A).setFill()
+          notch.fill()
+
+          // Electric-blue edge and glow around the notch opening.
+          let glow = NSBezierPath()
+          glow.move(to: NSPoint(x: 300, y: 1005))
+          glow.curve(
+              to: NSPoint(x: 348, y: 835),
+              controlPoint1: NSPoint(x: 304, y: 918),
+              controlPoint2: NSPoint(x: 310, y: 840)
+          )
+          glow.curve(
+              to: NSPoint(x: 676, y: 835),
+              controlPoint1: NSPoint(x: 424, y: 820),
+              controlPoint2: NSPoint(x: 600, y: 820)
+          )
+          glow.curve(
+              to: NSPoint(x: 724, y: 1005),
+              controlPoint1: NSPoint(x: 714, y: 840),
+              controlPoint2: NSPoint(x: 720, y: 918)
+          )
+          let notchShadow = NSShadow()
+          notchShadow.shadowColor = color(0x176CFF, alpha: 0.95)
+          notchShadow.shadowBlurRadius = 25
+          notchShadow.shadowOffset = .zero
+          notchShadow.set()
+          glow.lineWidth = 11
+          color(0x4A8FFF).setStroke()
+          glow.stroke()
+
+          NSGraphicsContext.current?.saveGraphicsState()
+
+          let rounded = NSFont.systemFont(ofSize: 430, weight: .heavy)
+          drawGradientText(
+              "S",
+              font: rounded,
+              at: NSPoint(x: 125, y: 215),
+              colors: [color(0x13E4FF), color(0x6574FF), color(0xA631FF)],
+              shadowColor: color(0x2F65FF, alpha: 0.75),
+              shadowBlur: 20
+          )
+          drawGradientText(
+              "N",
+              font: rounded,
+              at: NSPoint(x: 420, y: 215),
+              colors: [color(0xF9FBFF), color(0xAAB6CA), color(0x58667C)],
+              shadowColor: color(0x73A7FF, alpha: 0.38),
+              shadowBlur: 13
+          )
+
+          canvas.unlockFocus()
+
+          guard let tiff = canvas.tiffRepresentation,
+                let bitmap = NSBitmapImageRep(data: tiff),
+                let png = bitmap.representation(using: .png, properties: [.compressionFactor: 1.0]) else {
+              fatalError("Could not encode SuperNotch icon")
+          }
+
+          let destination = URL(fileURLWithPath: CommandLine.arguments[1])
+          try png.write(to: destination, options: .atomic)
+          SWIFT
+
+          mkdir -p SuperNotch/Branding
+          mkdir -p SuperNotch/Assets.xcassets/AppIcon.appiconset
+
+          swift "$RUNNER_TEMP/GenerateSuperNotchIcon.swift" SuperNotch/Branding/AppIcon.png
+
+          APPICON=SuperNotch/Assets.xcassets/AppIcon.appiconset
+          cp SuperNotch/Branding/AppIcon.png "$APPICON/icon_512x512@2x.png"
+          sips -z 512 512 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_512x512.png" >/dev/null
+          sips -z 512 512 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_256x256@2x.png" >/dev/null
+          sips -z 256 256 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_256x256.png" >/dev/null
+          sips -z 256 256 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_128x128@2x.png" >/dev/null
+          sips -z 128 128 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_128x128.png" >/dev/null
+          sips -z 64 64 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_32x32@2x.png" >/dev/null
+          sips -z 32 32 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_32x32.png" >/dev/null
+          sips -z 32 32 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_16x16@2x.png" >/dev/null
+          sips -z 16 16 SuperNotch/Branding/AppIcon.png --out "$APPICON/icon_16x16.png" >/dev/null
+
+          cat > SuperNotch/Assets.xcassets/Contents.json <<'JSON'
+          {
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          JSON
+
+          cat > "$APPICON/Contents.json" <<'JSON'
+          {
+            "images" : [
+              { "filename" : "icon_16x16.png", "idiom" : "mac", "scale" : "1x", "size" : "16x16" },
+              { "filename" : "icon_16x16@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "16x16" },
+              { "filename" : "icon_32x32.png", "idiom" : "mac", "scale" : "1x", "size" : "32x32" },
+              { "filename" : "icon_32x32@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "32x32" },
+              { "filename" : "icon_128x128.png", "idiom" : "mac", "scale" : "1x", "size" : "128x128" },
+              { "filename" : "icon_128x128@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "128x128" },
+              { "filename" : "icon_256x256.png", "idiom" : "mac", "scale" : "1x", "size" : "256x256" },
+              { "filename" : "icon_256x256@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "256x256" },
+              { "filename" : "icon_512x512.png", "idiom" : "mac", "scale" : "1x", "size" : "512x512" },
+              { "filename" : "icon_512x512@2x.png", "idiom" : "mac", "scale" : "2x", "size" : "512x512" }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          JSON
+
+          file SuperNotch/Branding/AppIcon.png
+          sips -g pixelWidth -g pixelHeight SuperNotch/Branding/AppIcon.png
+
+      - name: Commit generated native icon assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add SuperNotch/Branding/AppIcon.png SuperNotch/Assets.xcassets
+          git diff --cached --check
+          git commit -m 'brand: install SuperNotch SN monogram icon'
+          git push origin HEAD:branding/supernotch
