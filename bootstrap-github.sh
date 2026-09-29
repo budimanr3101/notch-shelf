@@ -15,7 +15,7 @@ fi
 
 git init
 git add .
-git commit -m "feat: bootstrap NotchShelf MVP"
+git commit -m "feat: bootstrap SuperNotch MVP"
 git branch -M main
 gh repo create "$REPO_NAME" --public --source=. --remote=origin --push
 

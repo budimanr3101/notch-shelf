@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000001 /* NotchShelfApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* NotchShelfApp.swift */; };
+		A10000000000000000000001 /* SuperNotchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* SuperNotchApp.swift */; };
 		A10000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* AppDelegate.swift */; };
 		A10000000000000000000003 /* ShelfCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* ShelfCoordinator.swift */; };
 		A10000000000000000000004 /* ShelfStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* ShelfStore.swift */; };
@@ -15,7 +15,7 @@
 		A10000000000000000000006 /* ShortcutMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* ShortcutMonitor.swift */; };
 		A10000000000000000000007 /* FileMoveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* FileMoveService.swift */; };
 		A10000000000000000000008 /* NotchOverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* NotchOverlayController.swift */; };
-		A10000000000000000000009 /* NotchShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* NotchShelfView.swift */; };
+		A10000000000000000000009 /* SuperNotchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* SuperNotchView.swift */; };
 		A1000000000000000000000C /* Pocketbook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000C /* Pocketbook.swift */; };
 		A1000000000000000000000D /* PocketbookV3.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* PocketbookV3.swift */; };
 		A1000000000000000000000E /* PocketbookLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* PocketbookLibrary.swift */; };
@@ -28,7 +28,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B10000000000000000000001 /* NotchShelfApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchShelfApp.swift; sourceTree = "<group>"; };
+		B10000000000000000000001 /* SuperNotchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperNotchApp.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B10000000000000000000003 /* ShelfCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCoordinator.swift; sourceTree = "<group>"; };
 		B10000000000000000000004 /* ShelfStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfStore.swift; sourceTree = "<group>"; };
@@ -36,9 +36,9 @@
 		B10000000000000000000006 /* ShortcutMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutMonitor.swift; sourceTree = "<group>"; };
 		B10000000000000000000007 /* FileMoveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMoveService.swift; sourceTree = "<group>"; };
 		B10000000000000000000008 /* NotchOverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchOverlayController.swift; sourceTree = "<group>"; };
-		B10000000000000000000009 /* NotchShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchShelfView.swift; sourceTree = "<group>"; };
+		B10000000000000000000009 /* SuperNotchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperNotchView.swift; sourceTree = "<group>"; };
 		B1000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		B1000000000000000000000B /* NotchShelf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotchShelf.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000B /* SuperNotch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SuperNotch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000C /* Pocketbook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pocketbook.swift; sourceTree = "<group>"; };
 		B1000000000000000000000D /* PocketbookV3.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookV3.swift; sourceTree = "<group>"; };
 		B1000000000000000000000E /* PocketbookLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketbookLibrary.swift; sourceTree = "<group>"; };
@@ -64,15 +64,15 @@
 		D10000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
-				D10000000000000000000002 /* NotchShelf */,
+				D10000000000000000000002 /* SuperNotch */,
 				D10000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		D10000000000000000000002 /* NotchShelf */ = {
+		D10000000000000000000002 /* SuperNotch */ = {
 			isa = PBXGroup;
 			children = (
-				B10000000000000000000001 /* NotchShelfApp.swift */,
+				B10000000000000000000001 /* SuperNotchApp.swift */,
 				B10000000000000000000002 /* AppDelegate.swift */,
 				B10000000000000000000013 /* NotchTerminalNative.swift */,
 				B10000000000000000000003 /* ShelfCoordinator.swift */,
@@ -81,7 +81,7 @@
 				B10000000000000000000006 /* ShortcutMonitor.swift */,
 				B10000000000000000000007 /* FileMoveService.swift */,
 				B10000000000000000000008 /* NotchOverlayController.swift */,
-				B10000000000000000000009 /* NotchShelfView.swift */,
+				B10000000000000000000009 /* SuperNotchView.swift */,
 				B1000000000000000000000C /* Pocketbook.swift */,
 				B1000000000000000000000D /* PocketbookV3.swift */,
 				B1000000000000000000000E /* PocketbookLibrary.swift */,
@@ -91,13 +91,13 @@
 				B10000000000000000000012 /* PocketbookSettings.swift */,
 				B1000000000000000000000A /* Info.plist */,
 			);
-			path = NotchShelf;
+			path = SuperNotch;
 			sourceTree = "<group>";
 		};
 		D10000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				B1000000000000000000000B /* NotchShelf.app */,
+				B1000000000000000000000B /* SuperNotch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -105,9 +105,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E10000000000000000000001 /* NotchShelf */ = {
+		E10000000000000000000001 /* SuperNotch */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = H10000000000000000000002 /* Build configuration list for PBXNativeTarget "NotchShelf" */;
+			buildConfigurationList = H10000000000000000000002 /* Build configuration list for PBXNativeTarget "SuperNotch" */;
 			buildPhases = (
 				F10000000000000000000001 /* Sources */,
 				C10000000000000000000001 /* Frameworks */,
@@ -120,9 +120,9 @@
 			packageProductDependencies = (
 				J20000000000000000000001 /* SwiftTerm */,
 			);
-			name = NotchShelf;
-			productName = NotchShelf;
-			productReference = B1000000000000000000000B /* NotchShelf.app */;
+			name = SuperNotch;
+			productName = SuperNotch;
+			productReference = B1000000000000000000000B /* SuperNotch.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -140,7 +140,7 @@
 					};
 				};
 			};
-			buildConfigurationList = H10000000000000000000001 /* Build configuration list for PBXProject "NotchShelf" */;
+			buildConfigurationList = H10000000000000000000001 /* Build configuration list for PBXProject "SuperNotch" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -156,7 +156,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E10000000000000000000001 /* NotchShelf */,
+				E10000000000000000000001 /* SuperNotch */,
 			);
 		};
 /* End PBXProject section */
@@ -176,7 +176,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000001 /* NotchShelfApp.swift in Sources */,
+				A10000000000000000000001 /* SuperNotchApp.swift in Sources */,
 				A10000000000000000000002 /* AppDelegate.swift in Sources */,
 				A10000000000000000000013 /* NotchTerminalNative.swift in Sources */,
 				A10000000000000000000003 /* ShelfCoordinator.swift in Sources */,
@@ -185,7 +185,7 @@
 				A10000000000000000000006 /* ShortcutMonitor.swift in Sources */,
 				A10000000000000000000007 /* FileMoveService.swift in Sources */,
 				A10000000000000000000008 /* NotchOverlayController.swift in Sources */,
-				A10000000000000000000009 /* NotchShelfView.swift in Sources */,
+				A10000000000000000000009 /* SuperNotchView.swift in Sources */,
 				A1000000000000000000000C /* Pocketbook.swift in Sources */,
 				A1000000000000000000000D /* PocketbookV3.swift in Sources */,
 				A1000000000000000000000E /* PocketbookLibrary.swift in Sources */,
@@ -251,14 +251,14 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NotchShelf/Info.plist;
+				INFOPLIST_FILE = SuperNotch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.budiman.notchshelf;
+				PRODUCT_BUNDLE_IDENTIFIER = com.budiman.supernotch;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -273,14 +273,14 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NotchShelf/Info.plist;
+				INFOPLIST_FILE = SuperNotch/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.budiman.notchshelf;
+				PRODUCT_BUNDLE_IDENTIFIER = com.budiman.supernotch;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -290,7 +290,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		H10000000000000000000001 /* Build configuration list for PBXProject "NotchShelf" */ = {
+		H10000000000000000000001 /* Build configuration list for PBXProject "SuperNotch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				I10000000000000000000001 /* Debug */,
@@ -299,7 +299,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		H10000000000000000000002 /* Build configuration list for PBXNativeTarget "NotchShelf" */ = {
+		H10000000000000000000002 /* Build configuration list for PBXNativeTarget "SuperNotch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				I10000000000000000000003 /* Debug */,

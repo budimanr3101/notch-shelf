@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-struct NotchShelfView: View {
+struct SuperNotchView: View {
     @ObservedObject var model: NotchOverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -564,7 +564,7 @@ struct NotchWings: Shape {
         let leftHardwareEdge = rect.midX - geometry.hardwareWidth / 2
         let rightHardwareEdge = rect.midX + geometry.hardwareWidth / 2
 
-        let silhouette = NotchShelfShape(
+        let silhouette = SuperNotchShape(
             topRadius: NotchGeometry.topRadius,
             bottomRadius: NotchGeometry.bottomRadius
         )
@@ -617,7 +617,7 @@ struct NotchWings: Shape {
     }
 }
 
-private struct NotchShelfShape: Shape {
+private struct SuperNotchShape: Shape {
     var topRadius: CGFloat
     var bottomRadius: CGFloat
 

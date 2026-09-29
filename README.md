@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  NotchShelf
+  SuperNotch
   <br>
 </h1>
 
@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-NotchShelf.dmg-black?style=for-the-badge&logo=apple" alt="Download NotchShelf for macOS"></a>
+  <a href="https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-SuperNotch.dmg-black?style=for-the-badge&logo=apple" alt="Download SuperNotch for macOS"></a>
 </p>
 
-NotchShelf turns the physical MacBook notch into a compact workspace for moving files, opening developer projects, keeping DevOps references nearby, and running a real terminal without leaving the top of your screen.
+SuperNotch turns the physical MacBook notch into a compact workspace for moving files, opening developer projects, keeping DevOps references nearby, and running a real terminal without leaving the top of your screen.
 
 The interface is designed around the actual hardware notch rather than a generic floating pill. Primary surfaces expand from the notch and collapse back into it when you are done.
 
@@ -30,17 +30,17 @@ The interface is designed around the actual hardware notch rather than a generic
 - macOS 15 or later
 - A MacBook with a physical display notch is recommended
 
-1. Download [`NotchShelf.dmg`](https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg).
+1. Download [`SuperNotch.dmg`](https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg).
 2. Open the DMG.
-3. Drag **NotchShelf** into **Applications**.
-4. Try to launch NotchShelf from Applications.
-5. If macOS blocks the first launch, open **System Settings → Privacy & Security**, scroll down, click **Open Anyway** for NotchShelf, then confirm **Open**.
+3. Drag **SuperNotch** into **Applications**.
+4. Try to launch SuperNotch from Applications.
+5. If macOS blocks the first launch, open **System Settings → Privacy & Security**, scroll down, click **Open Anyway** for SuperNotch, then confirm **Open**.
 6. Allow Finder Automation when macOS asks for it.
 
-NotchShelf runs as a menu bar utility, so it does not keep a normal Dock window open.
+SuperNotch runs as a menu bar utility, so it does not keep a normal Dock window open.
 
 > [!WARNING]
-> Current free releases are **unsigned and not Apple-notarized**. macOS may warn that the developer cannot be verified or that Apple cannot check the app for malicious software. Only download NotchShelf from this official GitHub repository and verify the included SHA-256 checksum if you want to confirm the downloaded DMG matches the published artifact.
+> Current free releases are **unsigned and not Apple-notarized**. macOS may warn that the developer cannot be verified or that Apple cannot check the app for malicious software. Only download SuperNotch from this official GitHub repository and verify the included SHA-256 checksum if you want to confirm the downloaded DMG matches the published artifact.
 
 ## Features
 
@@ -60,7 +60,7 @@ Select one or more files or folders in Finder, press `Command + X`, navigate to 
 
 The original files are **not** moved when `Command + X` is pressed. They are moved only after `Command + V`.
 
-NotchShelf applies a conservative file-move policy:
+SuperNotch applies a conservative file-move policy:
 
 - Existing destination items are never overwritten.
 - The entire batch is validated before mutation starts.
@@ -71,7 +71,7 @@ NotchShelf applies a conservative file-move policy:
 
 ## Developer Drop Zone
 
-Drop a file or project near the notch and NotchShelf can route it to the developer tool you use most.
+Drop a file or project near the notch and SuperNotch can route it to the developer tool you use most.
 
 Supported built-in targets include:
 
@@ -132,13 +132,13 @@ Default shortcut: `Shift + Command + N`.
 | Open Pocketbook | `Option + K` |
 | Open Notch Terminal | `Shift + Command + N` |
 
-Pocketbook and Terminal shortcuts are configurable. Unsafe Shift-only global shortcuts are rejected so NotchShelf does not accidentally hijack normal typing.
+Pocketbook and Terminal shortcuts are configurable. Unsafe Shift-only global shortcuts are rejected so SuperNotch does not accidentally hijack normal typing.
 
 Global hotkeys use Carbon registration and do **not** require Accessibility or Input Monitoring permission.
 
 ## Privacy
 
-NotchShelf is designed to keep file and terminal activity local.
+SuperNotch is designed to keep file and terminal activity local.
 
 - Raw terminal commands are not written to `NSLog`.
 - Interactive terminal responses are not copied into the legacy custom-command history path.
@@ -155,12 +155,12 @@ NotchShelf is designed to keep file and terminal activity local.
 ```bash
 git clone https://github.com/budimanr3101/notch-shelf.git
 cd notch-shelf
-open NotchShelf.xcodeproj
+open SuperNotch.xcodeproj
 ```
 
-Select your development team under **Signing & Capabilities**, choose the **NotchShelf** scheme, and run on **My Mac**.
+Select your development team under **Signing & Capabilities**, choose the **SuperNotch** scheme, and run on **My Mac**.
 
-Bundle identifier: `com.budiman.notchshelf`
+Bundle identifier: `com.budiman.supernotch`
 
 SwiftTerm is pinned through Swift Package Manager for the native terminal surface.
 
@@ -181,4 +181,4 @@ CI passing means the project compiles successfully on GitHub's macOS runner. Int
 
 ---
 
-<p align="center"><strong>NotchShelf</strong> · built for the space your screen already gave up.</p>
+<p align="center"><strong>SuperNotch</strong> · built for the space your screen already gave up.</p>

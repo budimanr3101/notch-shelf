@@ -62,7 +62,7 @@ private enum NotchTerminalNativeActivityEvent {
     case finished(Int32)
 }
 
-private final class NotchShelfLocalTerminalView: LocalProcessTerminalView {
+private final class SuperNotchLocalTerminalView: LocalProcessTerminalView {
     var onActivityEvent: ((NotchTerminalNativeActivityEvent) -> Void)?
     private var activityBuffer = ""
 
@@ -73,7 +73,7 @@ private final class NotchShelfLocalTerminalView: LocalProcessTerminalView {
 
     private func inspectActivityMarkers(_ bytes: ArraySlice<UInt8>) {
         activityBuffer += String(decoding: bytes, as: UTF8.self)
-        let prefix = "\u{1B}]777;notchshelf;"
+        let prefix = "\u{1B}]777;supernotch;"
         let terminator = "\u{7}"
 
         while let marker = activityBuffer.range(of: prefix),
@@ -103,17 +103,17 @@ private final class NotchTerminalSession: NSObject, ObservableObject, LocalProce
     @Published var presented = false
     @Published var directoryLabel = "~"
 
-    let terminalView: NotchShelfLocalTerminalView
+    let terminalView: SuperNotchLocalTerminalView
     var onActivityChanged: (() -> Void)?
 
     private let workingDirectoryProvider: () -> URL?
     private var configurationDirectory: URL?
     private var restartRequested = false
-    private let activityID = "notchshelf-native-terminal"
+    private let activityID = "supernotch-native-terminal"
 
     init(workingDirectoryProvider: @escaping () -> URL?) {
         self.workingDirectoryProvider = workingDirectoryProvider
-        terminalView = NotchShelfLocalTerminalView(frame: .zero)
+        terminalView = SuperNotchLocalTerminalView(frame: .zero)
         super.init()
 
         terminalView.processDelegate = self
@@ -189,7 +189,7 @@ private final class NotchTerminalSession: NSObject, ObservableObject, LocalProce
             }
         } catch {
             sessionAlive = false
-            NSLog("[NotchShelf] Native terminal setup failed: %@", error.localizedDescription)
+            NSLog("[SuperNotch] Native terminal setup failed: %@", error.localizedDescription)
         }
     }
 
@@ -203,7 +203,7 @@ private final class NotchTerminalSession: NSObject, ObservableObject, LocalProce
         let originalZDOTDIR = environment["ZDOTDIR"]
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         let configuration = FileManager.default.temporaryDirectory
-            .appendingPathComponent("notchshelf-native-zsh-" + UUID().uuidString)
+            .appendingPathComponent("supernotch-native-zsh-" + UUID().uuidString)
         try FileManager.default.createDirectory(
             at: configuration,
             withIntermediateDirectories: true
@@ -224,16 +224,16 @@ private final class NotchTerminalSession: NSObject, ObservableObject, LocalProce
             if file == ".zlogin" {
                 contents += """
                 autoload -Uz add-zsh-hook
-                function _notchshelf_preexec() {
-                    printf '\\e]777;notchshelf;start;%s\\a' "$1"
+                function _supernotch_preexec() {
+                    printf '\\e]777;supernotch;start;%s\\a' "$1"
                 }
-                function _notchshelf_precmd() {
+                function _supernotch_precmd() {
                     local result=$?
-                    printf '\\e]777;notchshelf;finish;%s\\a' "$result"
+                    printf '\\e]777;supernotch;finish;%s\\a' "$result"
                     return $result
                 }
-                add-zsh-hook preexec _notchshelf_preexec
-                add-zsh-hook precmd _notchshelf_precmd
+                add-zsh-hook preexec _supernotch_preexec
+                add-zsh-hook precmd _supernotch_precmd
                 """
             }
 
@@ -326,9 +326,9 @@ private struct NotchTerminalMetrics {
 
 @MainActor
 final class NotchTerminalFeature {
-    private static let keyCodeKey = "NotchShelf.Terminal.keyCode"
-    private static let modifiersKey = "NotchShelf.Terminal.modifiers"
-    private static let labelKey = "NotchShelf.Terminal.keyLabel"
+    private static let keyCodeKey = "SuperNotch.Terminal.keyCode"
+    private static let modifiersKey = "SuperNotch.Terminal.modifiers"
+    private static let labelKey = "SuperNotch.Terminal.keyLabel"
     private static let activityPanelIdentifier = "NotchTerminalActivityPanel"
     private let signature: OSType = 0x4E535454 // NSTT
 
@@ -381,7 +381,7 @@ final class NotchTerminalFeature {
             return noErr
         }
         guard handlerStatus == noErr else {
-            NSLog("[NotchShelf] Terminal hotkey handler failed: %d", handlerStatus)
+            NSLog("[SuperNotch] Terminal hotkey handler failed: %d", handlerStatus)
             return
         }
 
@@ -394,8 +394,8 @@ final class NotchTerminalFeature {
         }
 
         NSLog(registerStatus == noErr
-            ? "[NotchShelf] Native terminal ready on \(shortcut.displayString)"
-            : "[NotchShelf] Terminal shortcut unavailable: \(shortcut.displayString)")
+            ? "[SuperNotch] Native terminal ready on \(shortcut.displayString)"
+            : "[SuperNotch] Terminal shortcut unavailable: \(shortcut.displayString)")
     }
 
     func stop() {

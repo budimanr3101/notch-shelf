@@ -31,9 +31,9 @@ private struct ResolvedDropOpener {
 
 @MainActor
 final class ShelfCoordinator {
-    private static let recentProjectDefaultsKey = "NotchShelf.recentProjectPath"
-    private static let defaultOpenerDefaultsKey = "NotchShelf.defaultDropOpener"
-    private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
+    private static let recentProjectDefaultsKey = "SuperNotch.recentProjectPath"
+    private static let defaultOpenerDefaultsKey = "SuperNotch.defaultDropOpener"
+    private static let customOpenerPathDefaultsKey = "SuperNotch.customDropOpenerPath"
 
     private static let openerCatalog: [DropOpenerDefinition] = [
         .init(id: "finder", displayName: "Finder", bundleIdentifier: "com.apple.finder", behavior: .finder),
@@ -166,7 +166,7 @@ final class ShelfCoordinator {
     func chooseCustomDropApp() {
         let picker = NSOpenPanel()
         picker.title = "Choose Default Drop App"
-        picker.message = "Folders and files dropped into NotchShelf will open with this application."
+        picker.message = "Folders and files dropped into SuperNotch will open with this application."
         picker.prompt = "Choose App"
         picker.canChooseFiles = true
         picker.canChooseDirectories = false
@@ -202,7 +202,7 @@ final class ShelfCoordinator {
             icon: NSImage(systemSymbolName: "folder.badge.minus", accessibilityDescription: nil)
         )
         scheduleRestore(after: 1.0)
-        NSLog("[NotchShelf] Cleared recent project")
+        NSLog("[SuperNotch] Cleared recent project")
     }
 
     private func cutFromFinder() {
@@ -213,11 +213,11 @@ final class ShelfCoordinator {
             shortcuts.refreshRegistrations()
             overlay.showStaged(items: urls)
             onShelfChanged?(store.count)
-            NSLog("[NotchShelf] Staged \(urls.count) item(s)")
+            NSLog("[SuperNotch] Staged \(urls.count) item(s)")
         } catch {
             NSSound.beep()
             overlay.showFailure(error.localizedDescription, remainingItems: store.items)
-            NSLog("[NotchShelf] Cut failed: \(error.localizedDescription)")
+            NSLog("[SuperNotch] Cut failed: \(error.localizedDescription)")
         }
     }
 
@@ -242,7 +242,7 @@ final class ShelfCoordinator {
                     self.overlay.showFailure(errorMessage, remainingItems: result.remaining)
                     self.onShelfChanged?(self.store.count)
                     NSSound.beep()
-                    NSLog("[NotchShelf] Move failed: \(errorMessage)")
+                    NSLog("[SuperNotch] Move failed: \(errorMessage)")
                     return
                 }
 
@@ -250,13 +250,13 @@ final class ShelfCoordinator {
                 self.shortcuts.refreshRegistrations()
                 self.overlay.showSuccess(count: result.moved.count)
                 self.onShelfChanged?(0)
-                NSLog("[NotchShelf] Moved \(result.moved.count) item(s) to \(destination.path)")
+                NSLog("[SuperNotch] Moved \(result.moved.count) item(s) to \(destination.path)")
             }
         } catch {
             shortcuts.refreshRegistrations()
             overlay.showFailure(error.localizedDescription, remainingItems: store.items)
             NSSound.beep()
-            NSLog("[NotchShelf] Paste failed: \(error.localizedDescription)")
+            NSLog("[SuperNotch] Paste failed: \(error.localizedDescription)")
         }
     }
 
@@ -268,7 +268,7 @@ final class ShelfCoordinator {
             targetAppName: opener.displayName,
             targetAppIcon: opener.appIcon
         )
-        NSLog("[NotchShelf] Drop target: %@ -> %@", url.lastPathComponent, opener.displayName)
+        NSLog("[SuperNotch] Drop target: %@ -> %@", url.lastPathComponent, opener.displayName)
     }
 
     private func handleDroppedItem(_ url: URL) {
@@ -280,7 +280,7 @@ final class ShelfCoordinator {
         onProjectChanged?(project)
 
         openItemWithAnimatedFeedback(item)
-        NSLog("[NotchShelf] Dropped item: %@", item.path)
+        NSLog("[SuperNotch] Dropped item: %@", item.path)
     }
 
     private func openItemWithAnimatedFeedback(_ item: URL) {
@@ -303,7 +303,7 @@ final class ShelfCoordinator {
                     targetAppIcon: opener.appIcon
                 )
                 self.scheduleRestore(after: 1.2)
-                NSLog("[NotchShelf] Opened %@ in %@", item.lastPathComponent, opener.displayName)
+                NSLog("[SuperNotch] Opened %@ in %@", item.lastPathComponent, opener.displayName)
             } else {
                 self.overlay.showDropFailure(
                     item: item,
@@ -313,7 +313,7 @@ final class ShelfCoordinator {
                 )
                 self.scheduleRestore(after: 1.6)
                 NSSound.beep()
-                NSLog("[NotchShelf] Open failed: %@", message ?? "unknown error")
+                NSLog("[SuperNotch] Open failed: %@", message ?? "unknown error")
             }
         }
     }
@@ -555,7 +555,7 @@ final class ProjectDropTarget {
         guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
             magneticFrame = .zero
-            NSLog("[NotchShelf] Magnetic drop zone disabled: no physical notch")
+            NSLog("[SuperNotch] Magnetic drop zone disabled: no physical notch")
             return
         }
 
@@ -593,7 +593,7 @@ final class ProjectDropTarget {
         panel.orderOut(nil)
 
         NSLog(
-            "[NotchShelf] Magnetic drop zone ready: %@ (release before top edge)",
+            "[SuperNotch] Magnetic drop zone ready: %@ (release before top edge)",
             NSStringFromRect(magneticFrame)
         )
     }
@@ -626,7 +626,7 @@ final class ProjectDropTarget {
             if !magneticActive {
                 magneticActive = true
                 panel.orderFrontRegardless()
-                NSLog("[NotchShelf] Magnetic drop zone armed early before macOS top edge")
+                NSLog("[SuperNotch] Magnetic drop zone armed early before macOS top edge")
             }
             return
         }

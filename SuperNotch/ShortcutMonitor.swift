@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
-/// A single Carbon event handler for every NotchShelf global hotkey.
+/// A single Carbon event handler for every SuperNotch global hotkey.
 ///
 /// File Shelf and Pocketbook used to install independent handlers on the same
 /// application event target. Keeping one dispatcher avoids handler ordering
@@ -79,14 +79,14 @@ final class CarbonHotKeyCenter {
     private func dispatch(_ hotKeyID: EventHotKeyID) -> OSStatus {
         let signature = signatureString(hotKeyID.signature)
         NSLog(
-            "[NotchShelf] Hotkey fired: %@ id=%u",
+            "[SuperNotch] Hotkey fired: %@ id=%u",
             signature,
             hotKeyID.id
         )
 
         guard let callback = callbacks[key(signature: hotKeyID.signature, id: hotKeyID.id)] else {
             NSLog(
-                "[NotchShelf] No callback for hotkey %@ id=%u",
+                "[SuperNotch] No callback for hotkey %@ id=%u",
                 signature,
                 hotKeyID.id
             )
@@ -95,7 +95,7 @@ final class CarbonHotKeyCenter {
 
         let status = callback()
         NSLog(
-            "[NotchShelf] Hotkey handled: %@ id=%u status=%d",
+            "[SuperNotch] Hotkey handled: %@ id=%u status=%d",
             signature,
             hotKeyID.id,
             status
@@ -126,7 +126,7 @@ final class ShortcutMonitor {
         case paste = 2
     }
 
-    /// "NSHF". Used to make sure we only handle hotkeys registered by NotchShelf.
+    /// "NSHF". Used to make sure we only handle hotkeys registered by SuperNotch.
     private let hotKeySignature: OSType = 0x4E534846
 
     private var cutHotKey: EventHotKeyRef?
@@ -157,7 +157,7 @@ final class ShortcutMonitor {
             return noErr
         }
         guard cutStatus == noErr else {
-            NSLog("[NotchShelf] Could not install shared Cut hotkey handler (OSStatus %d)", cutStatus)
+            NSLog("[SuperNotch] Could not install shared Cut hotkey handler (OSStatus %d)", cutStatus)
             return
         }
 
@@ -178,7 +178,7 @@ final class ShortcutMonitor {
                 signature: hotKeySignature,
                 id: HotKeyKind.cut.rawValue
             )
-            NSLog("[NotchShelf] Could not install shared Paste hotkey handler (OSStatus %d)", pasteStatus)
+            NSLog("[SuperNotch] Could not install shared Paste hotkey handler (OSStatus %d)", pasteStatus)
             return
         }
 
@@ -205,7 +205,7 @@ final class ShortcutMonitor {
         }
 
         refreshRegistrations()
-        NSLog("[NotchShelf] Hotkey monitor started with shared Carbon router")
+        NSLog("[SuperNotch] Hotkey monitor started with shared Carbon router")
     }
 
     func stop() {
@@ -234,11 +234,11 @@ final class ShortcutMonitor {
         started = false
     }
 
-    /// Re-evaluates which shortcuts NotchShelf should own right now.
+    /// Re-evaluates which shortcuts SuperNotch should own right now.
     ///
     /// Cmd+X is only registered while Finder is frontmost. Cmd+V is even narrower:
     /// it is only registered while Finder is frontmost AND the shelf contains files.
-    /// Both are suspended while a NotchShelf window owns keyboard focus.
+    /// Both are suspended while a SuperNotch window owns keyboard focus.
     func refreshRegistrations() {
         if let keyWindow = NSApp.keyWindow, keyWindow.isVisible {
             unregisterCut()
@@ -279,12 +279,12 @@ final class ShortcutMonitor {
         )
 
         guard status == noErr else {
-            NSLog("[NotchShelf] Could not register Cmd+X (OSStatus %d)", status)
+            NSLog("[SuperNotch] Could not register Cmd+X (OSStatus %d)", status)
             return
         }
 
         cutHotKey = ref
-        NSLog("[NotchShelf] Cmd+X registered for Finder")
+        NSLog("[SuperNotch] Cmd+X registered for Finder")
     }
 
     private func registerPasteIfNeeded() {
@@ -302,12 +302,12 @@ final class ShortcutMonitor {
         )
 
         guard status == noErr else {
-            NSLog("[NotchShelf] Could not register Cmd+V (OSStatus %d)", status)
+            NSLog("[SuperNotch] Could not register Cmd+V (OSStatus %d)", status)
             return
         }
 
         pasteHotKey = ref
-        NSLog("[NotchShelf] Cmd+V captured while shelf has staged items")
+        NSLog("[SuperNotch] Cmd+V captured while shelf has staged items")
     }
 
     private func unregisterCut() {
@@ -343,7 +343,7 @@ private final class NotchLauncherModel: ObservableObject {
     @Published var presented = false
     @Published var launchingApplication: NotchLauncherApplication?
 
-    private static let recentKey = "NotchShelf.Launcher.recentApplications"
+    private static let recentKey = "SuperNotch.Launcher.recentApplications"
     private var loaded = false
 
     var results: [NotchLauncherApplication] {
@@ -385,13 +385,13 @@ private final class NotchLauncherModel: ObservableObject {
         guard !loaded else { return }
         loaded = true
         applications = Self.scanApplications()
-        NSLog("[NotchShelf] Launcher indexed %d application(s)", applications.count)
+        NSLog("[SuperNotch] Launcher indexed %d application(s)", applications.count)
     }
 
     func refreshApplications() {
         applications = Self.scanApplications()
         selectedIndex = 0
-        NSLog("[NotchShelf] Launcher refreshed %d application(s)", applications.count)
+        NSLog("[SuperNotch] Launcher refreshed %d application(s)", applications.count)
     }
 
     func moveSelection(_ delta: Int) {
@@ -487,7 +487,7 @@ private final class NotchLauncherModel: ObservableObject {
 
                 let bundle = Bundle(url: url)
                 let bundleID = bundle?.bundleIdentifier
-                if bundleID == "com.budiman.notchshelf" { continue }
+                if bundleID == "com.budiman.supernotch" { continue }
 
                 let displayName = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
                     ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
@@ -562,7 +562,7 @@ private final class NotchAppLauncher {
             return noErr
         }
         guard handlerStatus == noErr else {
-            NSLog("[NotchShelf] Launcher hotkey handler failed: %d", handlerStatus)
+            NSLog("[SuperNotch] Launcher hotkey handler failed: %d", handlerStatus)
             return
         }
 
@@ -579,14 +579,14 @@ private final class NotchAppLauncher {
 
         guard status == noErr else {
             CarbonHotKeyCenter.shared.removeHandler(signature: signature, id: 1)
-            NSLog("[NotchShelf] Launcher shortcut unavailable on ⌥Space (OSStatus %d)", status)
+            NSLog("[SuperNotch] Launcher shortcut unavailable on ⌥Space (OSStatus %d)", status)
             return
         }
 
         hotKey = reference
         started = true
         model.loadApplicationsIfNeeded()
-        NSLog("[NotchShelf] Notch Launcher ready on ⌥Space")
+        NSLog("[SuperNotch] Notch Launcher ready on ⌥Space")
     }
 
     func stop() {
@@ -695,7 +695,7 @@ private final class NotchAppLauncher {
         model.launchingApplication = app
         removeKeyMonitor()
         panel?.ignoresMouseEvents = true
-        NSLog("[NotchShelf] Launcher staging %@ before notch absorb", app.name)
+        NSLog("[SuperNotch] Launcher staging %@ before notch absorb", app.name)
 
         pendingLaunch?.cancel()
         let delay: TimeInterval = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -709,8 +709,8 @@ private final class NotchAppLauncher {
             let opened = NSWorkspace.shared.open(app.url)
             NSLog(
                 opened
-                    ? "[NotchShelf] Launcher opened %@ after staged absorb"
-                    : "[NotchShelf] Launcher failed to open %@ after staged absorb",
+                    ? "[SuperNotch] Launcher opened %@ after staged absorb"
+                    : "[SuperNotch] Launcher failed to open %@ after staged absorb",
                 app.name
             )
             self.pendingLaunch = nil

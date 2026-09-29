@@ -141,9 +141,9 @@ private enum PocketbookLayout {
 
 @MainActor
 final class PocketbookFeature {
-    private static let keyCodeKey = "NotchShelf.Pocketbook.keyCode"
-    private static let modifiersKey = "NotchShelf.Pocketbook.modifiers"
-    private static let labelKey = "NotchShelf.Pocketbook.keyLabel"
+    private static let keyCodeKey = "SuperNotch.Pocketbook.keyCode"
+    private static let modifiersKey = "SuperNotch.Pocketbook.modifiers"
+    private static let labelKey = "SuperNotch.Pocketbook.keyLabel"
     private let signature: OSType = 0x4E535042
 
     private let model = PocketbookModel()
@@ -218,14 +218,14 @@ final class PocketbookFeature {
         )
 
         guard status == noErr else {
-            NSLog("[NotchShelf] Pocketbook hotkey handler failed: %d", status)
+            NSLog("[SuperNotch] Pocketbook hotkey handler failed: %d", status)
             return
         }
 
         let registerStatus = registerShortcut()
         NSLog(registerStatus == noErr
-            ? "[NotchShelf] Pocketbook ready on \(shortcut.displayString)"
-            : "[NotchShelf] Pocketbook shortcut unavailable: \(shortcut.displayString)")
+            ? "[SuperNotch] Pocketbook ready on \(shortcut.displayString)"
+            : "[SuperNotch] Pocketbook shortcut unavailable: \(shortcut.displayString)")
     }
 
     func stop() {

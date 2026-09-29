@@ -32,8 +32,8 @@ struct PocketbookJSONEntry: Decodable {
 final class PocketbookV3Configuration: ObservableObject {
     static let shared = PocketbookV3Configuration()
 
-    private static let enabledKey = "NotchShelf.Pocketbook.enabledBooks"
-    private static let defaultKey = "NotchShelf.Pocketbook.defaultBook"
+    private static let enabledKey = "SuperNotch.Pocketbook.enabledBooks"
+    private static let defaultKey = "SuperNotch.Pocketbook.defaultBook"
 
     @Published private(set) var enabledBookIDs: Set<String>
     @Published private(set) var customBooks: [PocketbookV3Book] = []
@@ -56,7 +56,7 @@ final class PocketbookV3Configuration: ObservableObject {
     var configURL: URL {
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config", isDirectory: true)
-            .appendingPathComponent("notchshelf", isDirectory: true)
+            .appendingPathComponent("supernotch", isDirectory: true)
             .appendingPathComponent("pocketbook.json", isDirectory: false)
     }
 
@@ -187,10 +187,10 @@ final class PocketbookV3Configuration: ObservableObject {
 
             pruneMissingCustomBookSettings()
             normalizeDefault()
-            NSLog("[NotchShelf] Pocketbook custom config loaded: %d custom book(s)", customBooks.count)
+            NSLog("[SuperNotch] Pocketbook custom config loaded: %d custom book(s)", customBooks.count)
         } catch {
             customError = error.localizedDescription
-            NSLog("[NotchShelf] Pocketbook custom config error: %@", error.localizedDescription)
+            NSLog("[SuperNotch] Pocketbook custom config error: %@", error.localizedDescription)
             pruneMissingCustomBookSettings()
             normalizeDefault()
         }

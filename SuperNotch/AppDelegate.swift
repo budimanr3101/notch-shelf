@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private static let defaultOpenerDefaultsKey = "NotchShelf.defaultDropOpener"
-    private static let customOpenerPathDefaultsKey = "NotchShelf.customDropOpenerPath"
+    private static let defaultOpenerDefaultsKey = "SuperNotch.defaultDropOpener"
+    private static let customOpenerPathDefaultsKey = "SuperNotch.customDropOpenerPath"
 
     private let coordinator = ShelfCoordinator()
     private let pocketbook = PocketbookFeatureV3()
@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(
             systemSymbolName: "tray.full.fill",
-            accessibilityDescription: "NotchShelf"
+            accessibilityDescription: "SuperNotch"
         )
 
         let menu = NSMenu()
@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
-            title: "Quit NotchShelf",
+            title: "Quit SuperNotch",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusItem?.button?.image = NSImage(
             systemSymbolName: count == 0 ? "tray" : "tray.full.fill",
-            accessibilityDescription: "NotchShelf"
+            accessibilityDescription: "SuperNotch"
         )
     }
 

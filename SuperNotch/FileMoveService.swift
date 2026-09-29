@@ -114,7 +114,7 @@ final class FileMoveService {
         // Cross-volume fallback: copy to a unique temporary sibling first. Never copy
         // directly to the final target and never delete a path we did not create.
         let temporaryTarget = target.deletingLastPathComponent().appendingPathComponent(
-            ".notchshelf-move-\(UUID().uuidString)-\(target.lastPathComponent)"
+            ".supernotch-move-\(UUID().uuidString)-\(target.lastPathComponent)"
         )
 
         do {

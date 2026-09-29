@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 import SwiftUI
 
 @main
-struct NotchShelfApp: App {
+struct SuperNotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
@@ -16,10 +16,10 @@ struct NotchShelfApp: App {
 
     private static func migrateTerminalShortcutDefaultIfNeeded() {
         let defaults = UserDefaults.standard
-        let keyCodeKey = "NotchShelf.Terminal.keyCode"
-        let modifiersKey = "NotchShelf.Terminal.modifiers"
-        let labelKey = "NotchShelf.Terminal.keyLabel"
-        let migrationVersionKey = "NotchShelf.Terminal.shortcutMigrationVersion"
+        let keyCodeKey = "SuperNotch.Terminal.keyCode"
+        let modifiersKey = "SuperNotch.Terminal.modifiers"
+        let labelKey = "SuperNotch.Terminal.keyLabel"
+        let migrationVersionKey = "SuperNotch.Terminal.shortcutMigrationVersion"
         let currentMigrationVersion = 1
 
         // Migration is intentionally one-shot. Once a user has seen this migration,
@@ -46,7 +46,7 @@ struct NotchShelfApp: App {
         defaults.set(Int(kVK_ANSI_N), forKey: keyCodeKey)
         defaults.set(Int(shiftKey | cmdKey), forKey: modifiersKey)
         defaults.set("N", forKey: labelKey)
-        NSLog("[NotchShelf] Terminal shortcut default migrated to ⇧⌘N")
+        NSLog("[SuperNotch] Terminal shortcut default migrated to ⇧⌘N")
     }
 
     var body: some Scene {
@@ -189,7 +189,7 @@ final class NotchTerminalActivityController: ObservableObject {
             }
         }
 
-        NSLog("[NotchShelf] Background terminal activity ready (event-driven)")
+        NSLog("[SuperNotch] Background terminal activity ready (event-driven)")
     }
 
     func begin(id: String, command: String) {
@@ -207,7 +207,7 @@ final class NotchTerminalActivityController: ObservableObject {
         )
         // Never persist raw commands in the unified system log. Commands can contain
         // credentials, tokens, signed URLs, and other secrets.
-        NSLog("[NotchShelf] command started")
+        NSLog("[SuperNotch] command started")
         refreshVisibility()
     }
 
@@ -221,7 +221,7 @@ final class NotchTerminalActivityController: ObservableObject {
             startedAt: activeStartedAt ?? Date(),
             exitCode: status
         )
-        NSLog("[NotchShelf] command finished: exit=%d", status)
+        NSLog("[SuperNotch] command finished: exit=%d", status)
         refreshVisibility()
 
         finishDismissal?.cancel()
@@ -257,12 +257,12 @@ final class NotchTerminalActivityController: ObservableObject {
                 to: delegate,
                 from: nil
             )
-            NSLog("[NotchShelf] Terminal hotkey routed to AppDelegate handled=%d", handled ? 1 : 0)
+            NSLog("[SuperNotch] Terminal hotkey routed to AppDelegate handled=%d", handled ? 1 : 0)
             return handled ? noErr : OSStatus(eventNotHandledErr)
         }
 
         if status != noErr {
-            NSLog("[NotchShelf] Terminal hotkey route failed: %d", status)
+            NSLog("[SuperNotch] Terminal hotkey route failed: %d", status)
         }
     }
 
@@ -274,7 +274,7 @@ final class NotchTerminalActivityController: ObservableObject {
                   self.isFullTerminalWindow(window) else { return }
 
             if self.scrollFirstScrollViewToBottom(in: window.contentView) {
-                NSLog("[NotchShelf] Terminal restored at latest output")
+                NSLog("[SuperNotch] Terminal restored at latest output")
             }
         }
     }
@@ -378,7 +378,7 @@ final class NotchTerminalActivityController: ObservableObject {
         }
 
         guard panel?.isVisible != true else { return }
-        NSLog("[NotchShelf] background activity visible")
+        NSLog("[SuperNotch] background activity visible")
         panel?.orderFrontRegardless()
     }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_PATH="${1:?usage: install-app-icon.sh /path/to/NotchShelf.app}"
-ICON_SOURCE="${2:-NotchShelf/Branding/AppIcon.png}"
+APP_PATH="${1:?usage: install-app-icon.sh /path/to/SuperNotch.app}"
+ICON_SOURCE="${2:-SuperNotch/Branding/AppIcon.png}"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App bundle not found: $APP_PATH" >&2
@@ -14,7 +14,7 @@ if [[ ! -f "$ICON_SOURCE" ]]; then
   exit 1
 fi
 
-WORK_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/notchshelf-app-icon"
+WORK_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/supernotch-app-icon"
 CATALOG="$WORK_ROOT/Assets.xcassets"
 APPICON="$CATALOG/AppIcon.appiconset"
 PARTIAL_INFO="$WORK_ROOT/AppIcon-Info.plist"
@@ -93,7 +93,7 @@ fi
 touch "$INFO_PLIST"
 touch "$APP_PATH"
 
-echo "Compiled NotchShelf app icon with actool."
+echo "Compiled SuperNotch app icon with actool."
 echo "CFBundleIconFile=${ICON_FILE:-<none>}"
 echo "CFBundleIconName=${ICON_NAME:-<none>}"
 find "$RESOURCES" -maxdepth 1 -type f \( -name '*.icns' -o -name 'Assets.car' \) -print

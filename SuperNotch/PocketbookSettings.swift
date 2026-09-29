@@ -35,7 +35,7 @@ final class PocketbookV3SettingsWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "NotchShelf Settings"
+            window.title = "SuperNotch Settings"
             window.isReleasedWhenClosed = false
             window.center()
             window.delegate = self

@@ -23,7 +23,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>NotchShelf reads your Finder selection and current folder so Cmd+X and Cmd+V can move files through the notch shelf.</string>
+    <string>SuperNotch reads your Finder selection and current folder so Cmd+X and Cmd+V can move files through the notch shelf.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

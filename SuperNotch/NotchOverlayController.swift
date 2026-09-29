@@ -106,7 +106,7 @@ private final class NotchWindow: NSPanel {
         ignoresMouseEvents = true
         hidesOnDeactivate = false
 
-        let hosting = NSHostingView(rootView: NotchShelfView(model: model))
+        let hosting = NSHostingView(rootView: SuperNotchView(model: model))
         hosting.safeAreaRegions = []
         hosting.sizingOptions = []
         hosting.frame = NSRect(origin: .zero, size: geometry.windowSize)
@@ -175,7 +175,7 @@ private final class NotchSurfaceManager {
                 let status = sendHotKey(to: previousSurface)
                 if status != noErr {
                     NSLog(
-                        "[NotchShelf] Surface manager could not dismiss %@: %d",
+                        "[SuperNotch] Surface manager could not dismiss %@: %d",
                         previousSurface.rawValue,
                         status
                     )
@@ -188,7 +188,7 @@ private final class NotchSurfaceManager {
             previousWindow.orderOut(nil)
 
             NSLog(
-                "[NotchShelf] Primary surface switched: %@ -> %@",
+                "[SuperNotch] Primary surface switched: %@ -> %@",
                 previousSurface.rawValue,
                 nextSurface.rawValue
             )
@@ -290,7 +290,7 @@ final class NotchOverlayController {
         model.itemLabel = label(for: items)
         model.fileIcon = fileIcon(for: items)
         model.visualProgress = 0
-        NSLog("[NotchShelf] Staged label: %@", model.itemLabel)
+        NSLog("[SuperNotch] Staged label: %@", model.itemLabel)
         revealFromHardwareNotchIfNeeded()
     }
 
@@ -445,7 +445,7 @@ final class NotchOverlayController {
         guard let screen = NSScreen.screens.first(where: { NotchGeometry.measure($0) != nil }),
               let geometry = NotchGeometry.measure(screen) else {
             panel?.orderOut(nil)
-            NSLog("[NotchShelf] No measurable physical notch. Overlay suppressed.")
+            NSLog("[SuperNotch] No measurable physical notch. Overlay suppressed.")
             return false
         }
 
@@ -466,7 +466,7 @@ final class NotchOverlayController {
         if key != lastLoggedGeometryKey {
             lastLoggedGeometryKey = key
             NSLog(
-                "[NotchShelf] Geometry: screen=%@ frame=%@ safeTop=%.1f hardware=%.1fx%.1f window=%@ overlap=%.1f dropWing=%.1f dropDepth=%.1f",
+                "[SuperNotch] Geometry: screen=%@ frame=%@ safeTop=%.1f hardware=%.1fx%.1f window=%@ overlap=%.1f dropWing=%.1f dropDepth=%.1f",
                 screen.localizedName,
                 NSStringFromRect(screen.frame),
                 screen.safeAreaInsets.top,

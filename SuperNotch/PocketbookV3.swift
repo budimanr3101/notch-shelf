@@ -60,9 +60,9 @@ struct PocketbookV3Shortcut: Equatable {
 
 @MainActor
 final class PocketbookFeatureV3 {
-    private static let keyCodeKey = "NotchShelf.Pocketbook.keyCode"
-    private static let modifiersKey = "NotchShelf.Pocketbook.modifiers"
-    private static let labelKey = "NotchShelf.Pocketbook.keyLabel"
+    private static let keyCodeKey = "SuperNotch.Pocketbook.keyCode"
+    private static let modifiersKey = "SuperNotch.Pocketbook.modifiers"
+    private static let labelKey = "SuperNotch.Pocketbook.keyLabel"
     private let signature: OSType = 0x4E535033 // NSP3
 
     private let configuration = PocketbookV3Configuration.shared
@@ -107,7 +107,7 @@ final class PocketbookFeatureV3 {
             return noErr
         }
         guard handlerStatus == noErr else {
-            NSLog("[NotchShelf] Pocketbook shared hotkey handler failed: %d", handlerStatus)
+            NSLog("[SuperNotch] Pocketbook shared hotkey handler failed: %d", handlerStatus)
             return
         }
 
@@ -119,8 +119,8 @@ final class PocketbookFeatureV3 {
         }
 
         NSLog(registerStatus == noErr
-            ? "[NotchShelf] Pocketbook ready on \(shortcut.displayString)"
-            : "[NotchShelf] Pocketbook shortcut unavailable: \(shortcut.displayString)")
+            ? "[SuperNotch] Pocketbook ready on \(shortcut.displayString)"
+            : "[SuperNotch] Pocketbook shortcut unavailable: \(shortcut.displayString)")
     }
 
     func stop() {

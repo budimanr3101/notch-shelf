@@ -1,14 +1,14 @@
-# Releasing NotchShelf
+# Releasing SuperNotch
 
-NotchShelf supports two macOS distribution modes:
+SuperNotch supports two macOS distribution modes:
 
 1. **Unsigned community release** — free, no Apple Developer Program required. The DMG can be published to GitHub Releases, but macOS may block the first launch until the user explicitly allows the app in System Settings → Privacy & Security.
 2. **Developer ID signed and Apple-notarized release** — preferred when Apple Developer credentials are available. The same workflow automatically uses signing and notarization when the required GitHub secrets exist.
 
-Public releases use the stable asset name `NotchShelf.dmg`. This keeps the README download URL stable across versions:
+Public releases use the stable asset name `SuperNotch.dmg`. This keeps the README download URL stable across versions:
 
 ```text
-https://github.com/budimanr3101/notch-shelf/releases/latest/download/NotchShelf.dmg
+https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg
 ```
 
 The GitHub Release tag still carries the version, for example `v0.1.0`.
@@ -19,14 +19,14 @@ No Apple credentials are required.
 
 The workflow will:
 
-1. Build NotchShelf in Release configuration.
-2. Create `NotchShelf.dmg` with an Applications shortcut.
+1. Build SuperNotch in Release configuration.
+2. Create `SuperNotch.dmg` with an Applications shortcut.
 3. Verify the DMG with `hdiutil verify`.
-4. Generate `NotchShelf.dmg.sha256`.
+4. Generate `SuperNotch.dmg.sha256`.
 5. Upload the DMG as a GitHub Actions artifact.
 6. Publish a GitHub Release with an explicit **Unsigned Beta** warning and Gatekeeper instructions.
 
-Users may need to try opening NotchShelf once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm **Open**.
+Users may need to try opening SuperNotch once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm **Open**.
 
 ## Optional signed and notarized release
 
@@ -44,7 +44,7 @@ If you later join the Apple Developer Program, configure these repository secret
 When all required credentials are available, the workflow automatically:
 
 1. Imports the Developer ID certificate into a temporary keychain.
-2. Signs embedded code and `NotchShelf.app`.
+2. Signs embedded code and `SuperNotch.app`.
 3. Applies the Apple Events entitlement required for Finder automation.
 4. Submits the DMG to Apple notarization.
 5. Staples and validates the notarization ticket.
@@ -65,7 +65,7 @@ CI proves that the project builds and that the DMG can be packaged. It does not 
 Before promoting a build broadly, test at minimum:
 
 - DMG opens normally.
-- Dragging NotchShelf into Applications works.
+- Dragging SuperNotch into Applications works.
 - The Gatekeeper flow matches the documented unsigned-install instructions.
 - Finder Automation permission can be granted.
 - File Shelf `Cmd + X` / `Cmd + V` works.
@@ -80,8 +80,8 @@ Before promoting a build broadly, test at minimum:
 After downloading a release:
 
 ```bash
-shasum -a 256 NotchShelf.dmg
-cat NotchShelf.dmg.sha256
+shasum -a 256 SuperNotch.dmg
+cat SuperNotch.dmg.sha256
 ```
 
 The hashes should match.
