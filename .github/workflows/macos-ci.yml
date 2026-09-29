@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'hardening/**'
+      - 'branding/**'
   pull_request:
     branches:
       - main
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build NotchShelf
+    name: Build SuperNotch
     runs-on: macos-latest
     timeout-minutes: 15
 
@@ -33,18 +34,18 @@ jobs:
       - name: Validate shared scheme
         run: |
           xcodebuild \
-            -project NotchShelf.xcodeproj \
+            -project SuperNotch.xcodeproj \
             -list
 
       - name: Build Debug
         run: |
           set -o pipefail
           xcodebuild \
-            -project NotchShelf.xcodeproj \
-            -scheme NotchShelf \
+            -project SuperNotch.xcodeproj \
+            -scheme SuperNotch \
             -configuration Debug \
             -destination 'platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/NotchShelfDerivedData" \
+            -derivedDataPath "$RUNNER_TEMP/SuperNotchDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY='' \
