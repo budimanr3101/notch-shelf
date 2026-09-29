@@ -15,7 +15,7 @@ permissions:
 jobs:
   generate-icon:
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
           ref: branding/supernotch
           fetch-depth: 0
 
-      - name: Build valid native AppIcon set from selected artwork
+      - name: Decode selected artwork and build native AppIcon set
         shell: bash
         run: |
           set -euo pipefail
@@ -35,9 +35,11 @@ jobs:
           test -s "$SRC"
           mkdir -p "$DEST"
 
-          # Convert the selected artwork through macOS ImageIO so the committed
-          # master is a real PNG, not base64/text disguised as a .png file.
-          sips -s format png "$SRC" --out "$MASTER" >/dev/null
+          if ! command -v dwebp >/dev/null 2>&1; then
+            brew install webp
+          fi
+
+          dwebp "$SRC" -png -o "$MASTER"
           file "$MASTER" | grep -q 'PNG image data'
 
           width="$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/ {print $2}')"
