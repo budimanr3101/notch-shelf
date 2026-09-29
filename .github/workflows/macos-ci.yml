@@ -28,6 +28,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Reject stale pre-rebrand identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD_CAMEL="Notch""Shelf"
+          OLD_LOWER="notch""shelf"
+          OLD_UPPER="NOTCH""SHELF"
+
+          if git grep -n -I -e "$OLD_CAMEL" -e "$OLD_LOWER" -e "$OLD_UPPER" -- .; then
+            echo "Found stale pre-rebrand identifiers."
+            exit 1
+          fi
+
+          if find . -path './.git' -prune -o -name "*${OLD_CAMEL}*" -print | grep -q .; then
+            echo "Found stale pre-rebrand path names."
+            find . -path './.git' -prune -o -name "*${OLD_CAMEL}*" -print
+            exit 1
+          fi
+
       - name: Show Xcode version
         run: xcodebuild -version
 
