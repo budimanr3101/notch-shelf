@@ -39,7 +39,8 @@ jobs:
             brew install webp
           fi
 
-          dwebp "$SRC" -png -o "$MASTER"
+          # dwebp writes PNG by default.
+          dwebp "$SRC" -o "$MASTER"
           file "$MASTER" | grep -q 'PNG image data'
 
           width="$(sips -g pixelWidth "$MASTER" | awk '/pixelWidth/ {print $2}')"
