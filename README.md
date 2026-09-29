@@ -1,10 +1,10 @@
-<h1 align="center">
-  <br>
-  SuperNotch
-  <br>
-</h1>
+<h1 align="center">SuperNotch</h1>
 
-<h3 align="center">A productivity command surface built into your MacBook notch.</h3>
+<h3 align="center">Turn your MacBook notch into a native productivity command surface.</h3>
+
+<p align="center">
+  File Shelf · Developer Drop Zone · Pocketbook · Native Terminal
+</p>
 
 <p align="center">
   <a href="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml"><img src="https://github.com/budimanr3101/notch-shelf/actions/workflows/macos-ci.yml/badge.svg" alt="macOS CI"></a>
@@ -17,13 +17,13 @@
   <a href="https://github.com/budimanr3101/notch-shelf/releases/latest/download/SuperNotch.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-SuperNotch.dmg-black?style=for-the-badge&logo=apple" alt="Download SuperNotch for macOS"></a>
 </p>
 
-SuperNotch turns the physical MacBook notch into a compact workspace for moving files, opening developer projects, keeping DevOps references nearby, and running a real terminal without leaving the top of your screen.
+**SuperNotch** is a native macOS utility that turns the physical MacBook notch into a compact workspace. Stage and move Finder files, launch developer projects, keep Kubernetes and DevOps references nearby, and open a real Zsh terminal directly from the top of your screen.
 
-The interface is designed around the actual hardware notch rather than a generic floating pill. Primary surfaces expand from the notch and collapse back into it when you are done.
+Unlike a detached floating pill, SuperNotch is designed around the real display notch. Its primary surfaces expand from the hardware area and collapse back into it when you are done.
 
 ---
 
-## Installation
+## Download & Installation
 
 **Requirements**
 
@@ -42,14 +42,14 @@ SuperNotch runs as a menu bar utility, so it does not keep a normal Dock window 
 > [!WARNING]
 > Current free releases are **unsigned and not Apple-notarized**. macOS may warn that the developer cannot be verified or that Apple cannot check the app for malicious software. Only download SuperNotch from this official GitHub repository and verify the included SHA-256 checksum if you want to confirm the downloaded DMG matches the published artifact.
 
-## Features
+## What SuperNotch can do
 
 | Feature | Description |
 | --- | --- |
 | **File Shelf** | Use Finder `Command + X` to stage files and `Command + V` to move them into another Finder folder. |
 | **Developer Drop Zone** | Drag a file or project toward the notch and open it quickly in Finder, Terminal, iTerm2, VS Code, Cursor, Xcode, JetBrains IDEs, Warp, Zed, or a custom app. |
 | **Pocketbook** | Searchable Kubernetes, YAML, `kubectl`, and DevOps references with fast clipboard copy. |
-| **Native Notch Terminal** | A real PTY powered by SwiftTerm with native Zsh input, Tab completion, history, `Ctrl + R`, `Ctrl + C`, and interactive terminal apps. |
+| **Native Terminal** | A real PTY powered by SwiftTerm with native Zsh input, Tab completion, history, `Ctrl + R`, `Ctrl + C`, and interactive terminal apps. |
 | **Background Terminal Activity** | Long-running commands can surface a compact activity indicator after the full terminal is hidden. |
 | **Single Primary Surface** | Terminal, Pocketbook, and other large notch experiences are coordinated so they do not stack on top of each other. |
 | **Physical Notch UI** | The interface expands from the real MacBook notch geometry instead of imitating it with a detached floating window. |
@@ -105,9 +105,9 @@ Pocketbook keeps common DevOps references one shortcut away.
 
 Default shortcut: `Option + K`.
 
-## Native Notch Terminal
+## Native Terminal
 
-The Notch Terminal uses [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) with a real PTY and `/bin/zsh -l`.
+SuperNotch Terminal uses [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) with a real PTY and `/bin/zsh -l`.
 
 That means terminal input goes directly to the shell instead of through a separate command field.
 
@@ -130,7 +130,7 @@ Default shortcut: `Shift + Command + N`.
 | Stage Finder selection | `Command + X` |
 | Move staged Finder items | `Command + V` |
 | Open Pocketbook | `Option + K` |
-| Open Notch Terminal | `Shift + Command + N` |
+| Open SuperNotch Terminal | `Shift + Command + N` |
 
 Pocketbook and Terminal shortcuts are configurable. Unsafe Shift-only global shortcuts are rejected so SuperNotch does not accidentally hijack normal typing.
 
@@ -181,4 +181,4 @@ CI passing means the project compiles successfully on GitHub's macOS runner. Int
 
 ---
 
-<p align="center"><strong>SuperNotch</strong> · built for the space your screen already gave up.</p>
+<p align="center"><strong>SuperNotch</strong> · Your notch. Now useful.</p>
